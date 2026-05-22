@@ -142,8 +142,8 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_NO_BUFFERING, FILE_GENERIC_READ,
-        FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -154,12 +154,11 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
     };
     // The boot disk always has open handles (volumes, system). Exclusive open fails with
     // ERROR_SHARING_VIOLATION (0x80070020). Volume locking is handled separately.
+    // Do not use FILE_FLAG_NO_BUFFERING here: CreateFileW on \\.\PhysicalDriveN
+    // often returns ERROR_INVALID_PARAMETER (0x57) with it on NVMe/QEMU; sector I/O
+    // remains 512-byte aligned in read_sectors/write_sectors.
     let share = FILE_SHARE_READ | FILE_SHARE_WRITE;
-    let flags = if write {
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING
-    } else {
-        FILE_ATTRIBUTE_NORMAL
-    };
+    let flags = FILE_ATTRIBUTE_NORMAL;
 
     unsafe {
         let handle = CreateFileW(
@@ -196,6 +195,7 @@ fn sharing_violation_hint(code: u32) -> &'static str {
         0x20 => "ERROR_SHARING_VIOLATION - disk or volume is in use; close other disk tools",
         0x05 => "ERROR_ACCESS_DENIED - run as Administrator",
         0x02 => "ERROR_FILE_NOT_FOUND - check device path",
+        0x57 => "ERROR_INVALID_PARAMETER - check device path and open flags",
         _ => "CreateFileW failed",
     }
 }
