@@ -8,13 +8,15 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Use Node 24 for JavaScript actions (avoids Node 20 deprecation on runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -39,7 +41,7 @@ jobs:
           (Get-Item $dest).Length | Out-File -FilePath dist/size.txt
 
       - name: Upload Windows binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: yolomover-windows-x86_64
           path: dist/yolomover-x86_64-pc-windows-msvc.exe

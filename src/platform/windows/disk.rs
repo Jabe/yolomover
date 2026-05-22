@@ -147,7 +147,6 @@ fn io_err(path: &str, e: std::io::Error) -> YoloError {
 
 /// Resolve system boot disk index via `\\.\C:` device number IOCTL.
 pub fn system_disk_index() -> Result<u32> {
-    use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ,
