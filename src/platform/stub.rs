@@ -1,5 +1,5 @@
 use crate::error::{Result, YoloError};
-use crate::types::{DiskLayout, RelocationPlan, RelocateSummary, WinReStatus};
+use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, RelocateSummary, WinReStatus};
 
 pub fn inspect_system_disk(_disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
     Err(YoloError::NotWindows)
@@ -34,7 +34,7 @@ pub fn confirm_extend(_layout: &DiskLayout) -> Result<()> {
     Err(YoloError::NotWindows)
 }
 
-pub fn extend_boot_partition(_layout: &DiskLayout) -> Result<()> {
+pub fn extend_boot_partition(_layout: &DiskLayout) -> Result<ExtendSummary> {
     Err(YoloError::NotWindows)
 }
 

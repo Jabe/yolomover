@@ -5,7 +5,7 @@ use crate::gpt::SECTOR_SIZE;
 use crate::platform::windows::disk::PhysicalDisk;
 use crate::platform::windows::diskpart_cmd::run_diskpart;
 use crate::platform::windows::layout::read_disk_layout;
-use crate::types::DiskLayout;
+use crate::types::{DiskLayout, ExtendSummary};
 use tracing::info;
 
 /// Contiguous unallocated sectors immediately after the boot partition.
@@ -31,7 +31,7 @@ pub fn boot_partition_sectors(layout: &DiskLayout) -> Option<u64> {
     layout.boot_partition.as_ref().map(|p| p.sector_count())
 }
 
-pub fn extend_boot_volume(layout: &DiskLayout) -> Result<()> {
+pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let boot = layout.boot_partition.as_ref().ok_or_else(|| {
         YoloError::other("could not identify boot partition to extend")
     })?;
@@ -71,13 +71,19 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<()> {
         )));
     }
 
+    let extendable_after = extendable_sectors_after_boot(&after_layout);
     info!(
         before_sectors,
         after_sectors,
         grown_sectors = after_sectors - before_sectors,
+        extendable_after,
         "boot volume extend verified via GPT"
     );
-    Ok(())
+    Ok(ExtendSummary {
+        before_sectors,
+        after_sectors,
+        extendable_after_sectors: extendable_after,
+    })
 }
 
 fn system_drive_letter() -> String {

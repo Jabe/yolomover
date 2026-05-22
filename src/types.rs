@@ -89,6 +89,21 @@ pub struct RelocateSummary {
     pub winre_verified: bool,
 }
 
+/// Result of a completed boot volume extend (sizes from GPT).
+#[derive(Debug, Clone)]
+pub struct ExtendSummary {
+    pub before_sectors: u64,
+    pub after_sectors: u64,
+    /// Contiguous unallocated sectors still after the boot partition.
+    pub extendable_after_sectors: u64,
+}
+
+impl ExtendSummary {
+    pub fn grown_sectors(&self) -> u64 {
+        self.after_sectors.saturating_sub(self.before_sectors)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

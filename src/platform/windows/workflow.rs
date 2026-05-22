@@ -5,7 +5,7 @@ use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::reagentc::{self, disable_winre, register_winre_after_relocate};
 use crate::platform::windows::winre_inspect::verify_winre_partition;
 use crate::platform::windows::relocation::{execute_relocation, preflight};
-use crate::types::{DiskLayout, RelocationPlan, RelocateSummary, WinReStatus};
+use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, RelocateSummary, WinReStatus};
 use tracing::info;
 
 pub fn inspect_system_disk(disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
@@ -86,7 +86,7 @@ pub fn run_relocation(plan: &RelocationPlan, dry_run: bool) -> Result<()> {
     execute_relocation(&mut disk, plan)
 }
 
-pub fn extend_boot_partition(layout: &DiskLayout) -> Result<()> {
+pub fn extend_boot_partition(layout: &DiskLayout) -> Result<ExtendSummary> {
     extend_boot_volume(layout)
 }
 

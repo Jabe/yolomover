@@ -5,7 +5,7 @@
 //! 1. [`platform::inspect_system_disk`] — GPT layout + WinRE
 //! 2. [`plan::build_relocation_plan`] — validate and compute target LBAs
 //! 3. [`platform::relocate_workflow`] — disable WinRE, relocate, re-enable
-//! 4. [`platform::extend_boot_partition`] — grow boot volume (separate command)
+//! 4. [`platform::extend_boot_partition`] — grow boot volume; prints GPT before/after summary
 
 pub mod cli;
 pub mod error;
@@ -20,8 +20,8 @@ pub use error::{Result, YoloError};
 
 use crate::plan::build_relocation_plan;
 use crate::report::{
-    print_banner, print_disk_layout, print_extend_plan, print_plan, print_winre,
-    print_winre_partition,
+    print_banner, print_disk_layout, print_extend_plan, print_extend_summary, print_plan,
+    print_winre, print_winre_partition,
 };
 use crate::types::RelocateSummary;
 use cli::{Cli, Command};
@@ -151,10 +151,9 @@ fn cmd_extend(disk: Option<u32>, yes: bool) -> Result<()> {
     }
 
     platform::confirm_extend(&layout)?;
-    platform::extend_boot_partition(&layout)?;
-
-    eprintln!();
-    println!("Extend complete. Reboot or refresh Disk Management to confirm size.");
+    let summary = platform::extend_boot_partition(&layout)?;
+    println!();
+    print_extend_summary(&summary);
     Ok(())
 }
 

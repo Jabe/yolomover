@@ -1,5 +1,6 @@
 use crate::plan::build_relocation_plan;
-use crate::types::{DiskLayout, RelocationPlan, WinRePartitionInspect, WinReStatus};
+use crate::gpt::SECTOR_SIZE;
+use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, WinRePartitionInspect, WinReStatus};
 use std::fmt;
 
 pub fn print_banner() {
@@ -62,6 +63,38 @@ pub fn print_disk_layout(layout: &DiskLayout) {
         let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
         println!("  Boot volume: partition {} ({drive})", b.index);
     }
+}
+
+pub fn print_extend_summary(summary: &ExtendSummary) {
+    let letter = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let grown = summary.grown_sectors();
+    println!("Extend complete:");
+    println!("  Boot volume:  {letter}");
+    println!(
+        "  GPT extent:   {} sectors ({:.1} MiB) -> {} sectors ({:.1} MiB)",
+        summary.before_sectors,
+        sectors_to_mib(summary.before_sectors),
+        summary.after_sectors,
+        sectors_to_mib(summary.after_sectors),
+    );
+    println!(
+        "  Grown:        {} sectors ({:.1} MiB)",
+        grown,
+        sectors_to_mib(grown)
+    );
+    if summary.extendable_after_sectors == 0 {
+        println!("  Unallocated:  none contiguous after boot volume");
+    } else {
+        println!(
+            "  Unallocated:  {} sectors ({:.1} MiB) still after boot volume",
+            summary.extendable_after_sectors,
+            sectors_to_mib(summary.extendable_after_sectors)
+        );
+    }
+}
+
+fn sectors_to_mib(sectors: u64) -> f64 {
+    sectors as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
 }
 
 pub fn print_extend_plan(layout: &DiskLayout) {
