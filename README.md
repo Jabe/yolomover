@@ -58,7 +58,7 @@ Success is checked on disk, not by parsing `reagentc` or diskpart messages:
 - Refuses MBR, missing recovery partition, overlapping targets, and non-512-byte sectors.
 - Uses sector-granular copy with overlap checks; updates primary and backup GPT entry arrays.
 
-### Known limitations (v0.2)
+### Known limitations (v1.0)
 
 - Boot volume extend uses `diskpart` on `%SystemDrive%` (not GPT entry index).
 - Buffered overlap copies are capped at 2 GiB (typical recovery partitions are smaller).
