@@ -1,0 +1,46 @@
+name: Windows binary
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Smoke test (unit tests)
+        run: cargo test --release --locked
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          $src = "target/release/yolomover.exe"
+          if (-not (Test-Path $src)) { throw "Missing $src" }
+          $dest = "dist/yolomover-x86_64-pc-windows-msvc.exe"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $src $dest
+          (Get-Item $dest).Length | Out-File -FilePath dist/size.txt
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolomover-windows-x86_64
+          path: dist/yolomover-x86_64-pc-windows-msvc.exe
+          if-no-files-found: error
