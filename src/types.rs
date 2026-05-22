@@ -1,11 +1,28 @@
 use crate::gpt::{CopyStrategy, GptPartitionEntry};
 use std::fmt;
 
-/// WinRE status from `reagentc /info`.
+/// Raw `reagentc /info` text (shown for humans; verification uses partition file inspection).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinReStatus {
-    pub enabled: bool,
     pub raw_output: String,
+}
+
+/// Marker files on the recovery partition (`\\.\GLOBALROOT\...\Recovery\WindowsRE`).
+#[derive(Debug, Clone)]
+pub struct WinRePartitionInspect {
+    pub windows_path: String,
+    pub winre_wim_bytes: Option<u64>,
+    pub boot_sdi_bytes: Option<u64>,
+}
+
+impl WinRePartitionInspect {
+    /// Smallest plausible `winre.wim` (real images are hundreds of MiB).
+    pub const MIN_WINRE_WIM_BYTES: u64 = 1_048_576;
+
+    pub fn image_present(&self) -> bool {
+        self.winre_wim_bytes
+            .is_some_and(|b| b >= Self::MIN_WINRE_WIM_BYTES)
+    }
 }
 
 /// One physical disk with parsed GPT layout.
@@ -137,10 +154,6 @@ mod tests {
 
 impl fmt::Display for WinReStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "WinRE {}",
-            if self.enabled { "enabled" } else { "disabled" }
-        )
+        write!(f, "WinRE (reagentc /info below)")
     }
 }

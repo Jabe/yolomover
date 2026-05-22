@@ -2,7 +2,9 @@
 
 use crate::error::{Result, YoloError};
 use crate::gpt::SECTOR_SIZE;
+use crate::platform::windows::disk::PhysicalDisk;
 use crate::platform::windows::diskpart_cmd::run_diskpart;
+use crate::platform::windows::layout::read_disk_layout;
 use crate::types::DiskLayout;
 use tracing::info;
 
@@ -24,6 +26,11 @@ pub fn extendable_sectors_after_boot(layout: &DiskLayout) -> u64 {
     next_start.saturating_sub(boot_end + 1)
 }
 
+/// Boot partition extent in sectors (from primary GPT), for before/after extend checks.
+pub fn boot_partition_sectors(layout: &DiskLayout) -> Option<u64> {
+    layout.boot_partition.as_ref().map(|p| p.sector_count())
+}
+
 pub fn extend_boot_volume(layout: &DiskLayout) -> Result<()> {
     let boot = layout.boot_partition.as_ref().ok_or_else(|| {
         YoloError::other("could not identify boot partition to extend")
@@ -36,23 +43,40 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<()> {
         ));
     }
 
+    let before_sectors = boot_partition_sectors(layout).ok_or_else(|| {
+        YoloError::other("could not read boot partition size from GPT before extend")
+    })?;
+
     let letter = system_drive_letter();
     info!(
         drive = %letter,
         gpt_index = boot.index,
+        before_sectors,
         extendable_mib = extendable * SECTOR_SIZE / (1024 * 1024),
         "extending boot volume via diskpart"
     );
 
     let script = format!("select volume {letter}\nextend\nexit\n");
-    let output = run_diskpart(&script)?;
-    if !diskpart_extend_succeeded(&output) {
+    run_diskpart(&script)?;
+
+    let mut disk = PhysicalDisk::open_readonly(layout.disk_index)?;
+    let after_layout = read_disk_layout(&mut disk)?;
+    let after_sectors = boot_partition_sectors(&after_layout).ok_or_else(|| {
+        YoloError::other("could not read boot partition size from GPT after extend")
+    })?;
+
+    if after_sectors <= before_sectors {
         return Err(YoloError::other(format!(
-            "diskpart extend did not report success:\n{output}"
+            "boot partition GPT extent did not grow (before {before_sectors} sectors, after {after_sectors} sectors); check Disk Management"
         )));
     }
 
-    info!("boot volume extend completed");
+    info!(
+        before_sectors,
+        after_sectors,
+        grown_sectors = after_sectors - before_sectors,
+        "boot volume extend verified via GPT"
+    );
     Ok(())
 }
 
@@ -61,48 +85,4 @@ fn system_drive_letter() -> String {
         .unwrap_or_else(|_| "C:".into())
         .trim_end_matches(':')
         .to_ascii_uppercase()
-}
-
-/// Parse diskpart output (English or German) for a successful volume extend.
-fn diskpart_extend_succeeded(output: &str) -> bool {
-    let lower = output.to_ascii_lowercase();
-    if lower.contains("successfully extended")
-        || (lower.contains("erfolgreich") && (lower.contains("verl") || lower.contains("erweit")))
-    {
-        return true;
-    }
-    // No contiguous space / wrong selection often surfaces as an error string with exit 0.
-    !(lower.contains("error")
-        || lower.contains("fehler")
-        || lower.contains("failed")
-        || lower.contains("nicht gen")
-        || lower.contains("not enough")
-        || lower.contains("not supported")
-        || lower.contains("nicht unterst"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detects_english_extend_success() {
-        assert!(diskpart_extend_succeeded(
-            "DiskPart successfully extended the volume by 6 GB."
-        ));
-    }
-
-    #[test]
-    fn detects_german_extend_success() {
-        assert!(diskpart_extend_succeeded(
-            "Datenträgerpartition wurde erfolgreich verlängert."
-        ));
-    }
-
-    #[test]
-    fn rejects_extend_error_text() {
-        assert!(!diskpart_extend_succeeded(
-            "There is not enough usable free space on disk(s)."
-        ));
-    }
 }

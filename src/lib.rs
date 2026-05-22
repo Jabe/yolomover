@@ -21,6 +21,7 @@ pub use error::{Result, YoloError};
 use crate::plan::build_relocation_plan;
 use crate::report::{
     print_banner, print_disk_layout, print_extend_plan, print_plan, print_winre,
+    print_winre_partition,
 };
 use crate::types::RelocateSummary;
 use cli::{Cli, Command};
@@ -49,6 +50,7 @@ fn cmd_inspect(disk: Option<u32>) -> Result<()> {
     safety::validate_layout(&layout)?;
     print_disk_layout(&layout);
     print_winre(&winre);
+    print_winre_partition(&layout);
     print_extend_plan(&layout);
     Ok(())
 }
@@ -58,6 +60,7 @@ fn cmd_plan(disk: Option<u32>) -> Result<()> {
     safety::validate_layout(&layout)?;
     print_disk_layout(&layout);
     print_winre(&winre);
+    print_winre_partition(&layout);
     let plan = build_relocation_plan(&layout)?;
     print_plan(&plan);
     print_extend_plan(&layout);
@@ -84,6 +87,7 @@ fn cmd_relocate(disk: Option<u32>, yes: bool, dry_run: bool) -> Result<()> {
     safety::validate_layout(&layout)?;
     print_disk_layout(&layout);
     print_winre(&winre);
+    print_winre_partition(&layout);
 
     let plan = build_relocation_plan(&layout)?;
     print_plan(&plan);
@@ -109,7 +113,7 @@ fn cmd_relocate(disk: Option<u32>, yes: bool, dry_run: bool) -> Result<()> {
     if !dry_run && !summary.winre_verified {
         error!("WinRE verification failed after relocation");
         return Err(YoloError::WinRe {
-            detail: "reagentc /info does not show enabled after /enable".into(),
+            detail: "recovery partition missing winre.wim (see inspect output)".into(),
         });
     }
 
@@ -161,5 +165,8 @@ fn print_relocate_summary(summary: &RelocateSummary, dry_run: bool) {
     }
     println!("Relocate complete:");
     println!("  Relocated recovery: {}", summary.relocated);
-    println!("  WinRE verified:     {}", summary.winre_verified);
+    println!(
+        "  WinRE verified:     {} (winre.wim on recovery partition)",
+        summary.winre_verified
+    );
 }

@@ -1,5 +1,6 @@
 use crate::error::{Result, YoloError};
 use crate::platform::windows::diskpart_cmd::run_diskpart;
+use crate::platform::windows::winre_inspect::recovery_windowsre_dir;
 use crate::types::WinReStatus;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,19 +42,7 @@ fn run_reagentc(args: &[&str]) -> Result<String> {
 
 pub fn query_winre() -> Result<WinReStatus> {
     let raw = run_reagentc(&["/info"])?;
-    let enabled = parse_enabled(&raw);
-    Ok(WinReStatus {
-        enabled,
-        raw_output: raw,
-    })
-}
-
-fn parse_enabled(output: &str) -> bool {
-    let lower = output.to_lowercase();
-    if lower.contains("windows re status:") || lower.contains("windows re-status:") {
-        return lower.contains("enabled") && !lower.contains("disabled");
-    }
-    lower.contains("enabled")
+    Ok(WinReStatus { raw_output: raw })
 }
 
 pub fn disable_winre() -> Result<()> {
@@ -64,17 +53,6 @@ pub fn disable_winre() -> Result<()> {
 pub fn enable_winre() -> Result<()> {
     info!("enabling WinRE (reagentc /enable)");
     run_reagentc(&["/enable"]).map(|_| ())
-}
-
-pub fn verify_winre_enabled() -> Result<bool> {
-    let status = query_winre()?;
-    Ok(status.enabled)
-}
-
-fn recovery_globalroot_path(disk_index: u32, partition_number: u32) -> String {
-    format!(
-        r"\\?\GLOBALROOT\device\harddisk{disk_index}\partition{partition_number}\Recovery\WindowsRE"
-    )
 }
 
 fn system_recovery_store() -> PathBuf {
@@ -91,7 +69,7 @@ pub fn register_winre_after_relocate(disk_index: u32, partition_number: u32) -> 
     let _ = run_diskpart("rescan\nexit\n");
 
     if enable_winre().is_ok() {
-        info!("WinRE enabled after relocation");
+        info!("reagentc /enable succeeded");
         return Ok(());
     }
 
@@ -110,7 +88,7 @@ pub fn register_winre_after_relocate(disk_index: u32, partition_number: u32) -> 
 
 fn copy_winre_store_to_recovery(disk_index: u32, partition_number: u32) -> Result<()> {
     let store = system_recovery_store();
-    let dest_root = recovery_globalroot_path(disk_index, partition_number);
+    let dest_root = recovery_windowsre_dir(disk_index, partition_number);
     let dest = Path::new(&dest_root);
 
     std::fs::create_dir_all(dest).map_err(|e| YoloError::WinRe {
@@ -133,7 +111,7 @@ fn copy_winre_store_to_recovery(disk_index: u32, partition_number: u32) -> Resul
 }
 
 fn set_reimage_path(disk_index: u32, partition_number: u32) -> Result<()> {
-    let path = recovery_globalroot_path(disk_index, partition_number);
+    let path = recovery_windowsre_dir(disk_index, partition_number);
     info!(%path, "reagentc /setreimage");
     run_reagentc(&["/setreimage", "/path", &path]).map(|_| ())
 }

@@ -9,6 +9,23 @@ pub fn query_winre() -> Result<WinReStatus> {
     Err(YoloError::NotWindows)
 }
 
+pub fn inspect_winre_partition(_disk_index: u32, _partition_number: u32) -> crate::types::WinRePartitionInspect {
+    crate::types::WinRePartitionInspect {
+        windows_path: String::new(),
+        winre_wim_bytes: None,
+        boot_sdi_bytes: None,
+    }
+}
+
+pub fn verify_winre_partition(_disk_index: u32, _partition_number: u32) -> Result<bool> {
+    Err(YoloError::NotWindows)
+}
+
+#[allow(dead_code)]
+pub fn boot_partition_sectors(_layout: &DiskLayout) -> Option<u64> {
+    None
+}
+
 pub fn confirm_relocate(_plan: &RelocationPlan) -> Result<()> {
     Err(YoloError::NotWindows)
 }

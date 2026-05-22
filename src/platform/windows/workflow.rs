@@ -2,12 +2,11 @@ use crate::error::{Result, YoloError};
 use crate::platform::windows::disk::{is_elevated, system_disk_index, PhysicalDisk};
 use crate::platform::windows::extend::{extend_boot_volume, extendable_sectors_after_boot};
 use crate::platform::windows::layout::read_disk_layout;
-use crate::platform::windows::reagentc::{
-    self, disable_winre, register_winre_after_relocate, verify_winre_enabled,
-};
+use crate::platform::windows::reagentc::{self, disable_winre, register_winre_after_relocate};
+use crate::platform::windows::winre_inspect::verify_winre_partition;
 use crate::platform::windows::relocation::{execute_relocation, preflight};
 use crate::types::{DiskLayout, RelocationPlan, RelocateSummary, WinReStatus};
-use tracing::{info, warn};
+use tracing::info;
 
 pub fn inspect_system_disk(disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
     ensure_elevated()?;
@@ -39,7 +38,7 @@ pub fn confirm_relocate(plan: &RelocationPlan) -> Result<()> {
         plan.target_last_lba,
         plan.copy_strategy
     );
-    eprintln!("  3. Re-enable WinRE and verify");
+    eprintln!("  3. Re-enable WinRE and verify winre.wim on recovery partition");
     eprintln!();
     eprintln!("After success, extend the boot volume in a second step:");
     eprintln!("  yolomover extend --yes");
@@ -96,16 +95,17 @@ pub fn relocate_workflow(plan: &RelocationPlan, dry_run: bool) -> Result<Relocat
 
     if dry_run {
         info!("dry run workflow");
+        let win_part = plan.disk.windows_partition_number(&plan.recovery);
+        let winre_verified =
+            verify_winre_partition(plan.disk.disk_index, win_part).unwrap_or(false);
         return Ok(RelocateSummary {
             relocated: plan.needs_move(),
-            winre_verified: query_winre()?.enabled,
+            winre_verified,
         });
     }
 
     if plan.needs_move() {
-        if query_winre()?.enabled {
-            disable_winre()?;
-        }
+        disable_winre()?;
         run_relocation(plan, false)?;
         let win_part = plan.disk.windows_partition_number(&plan.recovery);
         register_winre_after_relocate(plan.disk.disk_index, win_part)?;
@@ -113,10 +113,8 @@ pub fn relocate_workflow(plan: &RelocationPlan, dry_run: bool) -> Result<Relocat
         info!("recovery already at end - skipping relocation");
     }
 
-    let winre_verified = verify_winre_enabled()?;
-    if !winre_verified {
-        warn!("WinRE not enabled after enable; try manual reagentc /info");
-    }
+    let win_part = plan.disk.windows_partition_number(&plan.recovery);
+    let winre_verified = verify_winre_partition(plan.disk.disk_index, win_part)?;
 
     Ok(RelocateSummary {
         relocated: plan.needs_move(),

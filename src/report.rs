@@ -1,5 +1,5 @@
 use crate::plan::build_relocation_plan;
-use crate::types::{DiskLayout, RelocationPlan, WinReStatus};
+use crate::types::{DiskLayout, RelocationPlan, WinRePartitionInspect, WinReStatus};
 use std::fmt;
 
 pub fn print_banner() {
@@ -93,11 +93,42 @@ fn partition_flags(p: &crate::gpt::GptPartitionEntry) -> String {
 }
 
 pub fn print_winre(status: &WinReStatus) {
-    println!("WinRE: {}", status);
+    println!("WinRE: {} (informational only)", status);
     if !status.raw_output.trim().is_empty() {
         println!("--- reagentc /info ---");
         println!("{}", status.raw_output.trim());
         println!("----------------------");
+    }
+}
+
+pub fn print_winre_partition(layout: &DiskLayout) {
+    let Some(recovery) = layout.recovery.as_ref() else {
+        println!("Recovery partition files: (no recovery partition in GPT)");
+        return;
+    };
+    let part = layout.windows_partition_number(recovery);
+    let inspect = crate::platform::inspect_winre_partition(layout.disk_index, part);
+    print_winre_partition_inspect(&inspect);
+}
+
+fn print_winre_partition_inspect(inspect: &WinRePartitionInspect) {
+    println!("Recovery partition files:");
+    println!("  Path:       {}", inspect.windows_path);
+    match inspect.winre_wim_bytes {
+        Some(b) => println!(
+            "  winre.wim:  {} bytes ({})",
+            b,
+            if inspect.image_present() {
+                "ok"
+            } else {
+                "too small"
+            }
+        ),
+        None => println!("  winre.wim:  (missing)"),
+    }
+    match inspect.boot_sdi_bytes {
+        Some(b) => println!("  boot.sdi:   {} bytes", b),
+        None => println!("  boot.sdi:   (missing)"),
     }
 }
 
