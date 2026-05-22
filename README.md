@@ -60,7 +60,7 @@ cargo test
 
 ### CI binary (GitHub Actions)
 
-Every push to `master` builds on `windows-latest` and uploads an artifact:
+Every push to `master` builds on `windows-2025` and uploads an artifact:
 
 **`yolomover-windows-x86_64`** → `yolomover-x86_64-pc-windows-msvc.exe`
 

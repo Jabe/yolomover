@@ -11,10 +11,11 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Pin image explicitly (avoids windows-latest → VS2026 redirect notice).
+    runs-on: windows-2025
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -39,7 +40,7 @@ jobs:
           (Get-Item $dest).Length | Out-File -FilePath dist/size.txt
 
       - name: Upload Windows binary
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: yolomover-windows-x86_64
           path: dist/yolomover-x86_64-pc-windows-msvc.exe
