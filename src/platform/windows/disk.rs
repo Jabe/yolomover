@@ -145,6 +145,19 @@ fn io_err(path: &str, e: std::io::Error) -> YoloError {
     }
 }
 
+/// `\\.\X:` device path for the system volume (`SystemDrive`, e.g. `\\.\C:`).
+///
+/// The trailing colon is required by `CreateFileW`; `\\.\C` is invalid.
+fn system_volume_device_path() -> String {
+    match std::env::var("SystemDrive") {
+        Ok(drive) => {
+            let letter = drive.trim_end_matches(':');
+            format!(r"\\.\{letter}:")
+        }
+        Err(_) => r"\\.\C:".to_string(),
+    }
+}
+
 /// Resolve system boot disk index via `\\.\C:` device number IOCTL.
 pub fn system_disk_index() -> Result<u32> {
     use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
@@ -157,9 +170,7 @@ pub fn system_disk_index() -> Result<u32> {
     };
     use windows::Win32::System::IO::DeviceIoControl;
 
-    let path = std::env::var("SystemDrive")
-        .map(|d| format!(r"\\.\{}", d.trim_end_matches(':')))
-        .unwrap_or_else(|_| r"\\.\C:".to_string());
+    let path = system_volume_device_path();
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
