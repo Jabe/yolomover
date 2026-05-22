@@ -27,7 +27,12 @@ pub fn build_relocation_plan(layout: &DiskLayout) -> Result<RelocationPlan> {
     );
     let target_last = target_first + sector_count - 1;
 
-    let already_at_end = recovery.first_lba == target_first && recovery.last_lba == target_last;
+    let already_at_end = no_relocation_needed(
+        layout,
+        &recovery,
+        target_first,
+        target_last,
+    );
 
     let src = LbaRange::new(current_first_lba, current_last_lba);
     let dst = LbaRange::new(target_first, target_last);
@@ -60,6 +65,40 @@ pub fn build_relocation_plan(layout: &DiskLayout) -> Result<RelocationPlan> {
         already_at_end: false,
         copy_strategy: strategy,
     })
+}
+
+/// True when relocating would not help extend C: (or is only a tiny alignment nudge at disk tail).
+fn no_relocation_needed(
+    layout: &DiskLayout,
+    recovery: &crate::gpt::GptPartitionEntry,
+    target_first: u64,
+    target_last: u64,
+) -> bool {
+    if recovery.first_lba == target_first && recovery.last_lba == target_last {
+        return true;
+    }
+
+    let start_shift = target_first.saturating_sub(recovery.first_lba);
+    let end_shift = target_last.saturating_sub(recovery.last_lba);
+    let alignment_only =
+        start_shift <= ALIGN_SECTORS && end_shift <= ALIGN_SECTORS && start_shift == end_shift;
+
+    if !alignment_only {
+        return false;
+    }
+
+    // Recovery immediately after C: — sliding it toward the tail does not free space before C:.
+    let adjacent_to_boot = layout
+        .boot_partition
+        .as_ref()
+        .is_some_and(|b| b.last_lba + 1 == recovery.first_lba);
+
+    let at_disk_tail = layout
+        .header_last_usable
+        .saturating_sub(recovery.last_lba)
+        <= ALIGN_SECTORS * 2;
+
+    adjacent_to_boot && at_disk_tail
 }
 
 fn validate_target(
@@ -128,6 +167,48 @@ mod tests {
             recovery: Some(recovery),
             boot_partition: None,
         }
+    }
+
+    #[test]
+    fn sharevm_like_layout_needs_no_move() {
+        // 64 GiB VM baseline: recovery already after C:, ~2 MiB slack at tail.
+        let boot_last = 132_808_703u64;
+        let recovery_first = 132_808_704u64;
+        let recovery_last = 134_213_631u64;
+        let last_usable = 134_217_694u64;
+        let boot = GptPartitionEntry {
+            index: 2,
+            type_guid: GptGuid::parse_str(crate::gpt::MS_BASIC_DATA_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+            first_lba: 444_416,
+            last_lba: boot_last,
+            attributes: 0,
+            name: "OS".into(),
+        };
+        let recovery = GptPartitionEntry {
+            index: 3,
+            type_guid: GptGuid::parse_str(RECOVERY_TYPE_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            first_lba: recovery_first,
+            last_lba: recovery_last,
+            attributes: 0,
+            name: "Recovery".into(),
+        };
+        let layout = DiskLayout {
+            disk_index: 0,
+            disk_path: "\\\\.\\PhysicalDrive0".into(),
+            is_gpt: true,
+            disk_size_bytes: (last_usable + 64) * 512,
+            sector_size: 512,
+            header_first_usable: 34,
+            header_last_usable: last_usable,
+            partitions: vec![boot.clone(), recovery.clone()],
+            recovery: Some(recovery),
+            boot_partition: Some(boot),
+        };
+        let plan = build_relocation_plan(&layout).unwrap();
+        assert!(plan.already_at_end);
+        assert!(!plan.needs_move());
     }
 
     #[test]

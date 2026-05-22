@@ -91,7 +91,13 @@ pub fn print_plan(plan: &RelocationPlan) {
         plan.target_first_lba, plan.target_last_lba
     );
     if plan.already_at_end {
-        println!("  Status:       already at end — no move required");
+        println!("  Status:       nothing to do — recovery already at disk tail");
+        if plan.current_first_lba != plan.target_first_lba {
+            println!(
+                "  Note:         skipped ~{} MiB alignment-only nudge (no space would be freed for C:)",
+                (plan.target_first_lba - plan.current_first_lba) * 512 / (1024 * 1024)
+            );
+        }
     } else if plan.needs_move() {
         let freed = estimate_freed_sectors(plan);
         println!(
