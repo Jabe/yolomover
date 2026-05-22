@@ -6,7 +6,7 @@ pub fn print_banner() {
     eprintln!(
         r#"
 ╔══════════════════════════════════════════════════════════════════╗
-║  yolomover — HIGH RISK disk partition operation                  ║
+║  yolomover - HIGH RISK disk partition operation                  ║
 ║  Moving the Windows Recovery partition can brick WinRE or boot.  ║
 ║  Ensure a full backup. Run inspect/plan before run.              ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -91,7 +91,7 @@ pub fn print_plan(plan: &RelocationPlan) {
         plan.target_first_lba, plan.target_last_lba
     );
     if plan.already_at_end {
-        println!("  Status:       nothing to do — recovery already at disk tail");
+        println!("  Status:       nothing to do - recovery already at disk tail");
         if plan.current_first_lba != plan.target_first_lba {
             println!(
                 "  Note:         skipped ~{} MiB alignment-only nudge (no space would be freed for C:)",

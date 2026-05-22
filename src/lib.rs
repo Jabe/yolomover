@@ -108,7 +108,7 @@ fn cmd_run(disk: Option<u32>, yes: bool, extend_c: bool, dry_run: bool) -> Resul
 
 fn print_summary(summary: &RunSummary, dry_run: bool) {
     if dry_run {
-        println!("Dry run complete — no changes written.");
+        println!("Dry run complete - no changes written.");
         return;
     }
     println!("Run complete:");

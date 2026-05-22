@@ -11,7 +11,7 @@ const COPY_CHUNK_SECTORS: u64 = 2048; // 1 MiB
 /// Copy recovery partition sectors to new LBAs and commit GPT tables.
 pub fn execute_relocation(disk: &mut PhysicalDisk, plan: &RelocationPlan) -> Result<()> {
     if !plan.needs_move() {
-        info!("relocation skipped — already at target");
+        info!("relocation skipped - already at target");
         return Ok(());
     }
 

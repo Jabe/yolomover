@@ -154,9 +154,9 @@ fn win32_create_err(path: &str, code: u32) -> YoloError {
 fn sharing_violation_hint(code: u32) -> &'static str {
     let code = win32_error_code(code);
     match code {
-        0x20 => "ERROR_SHARING_VIOLATION — disk or volume is in use; close other disk tools",
-        0x05 => "ERROR_ACCESS_DENIED — run as Administrator",
-        0x02 => "ERROR_FILE_NOT_FOUND — check device path",
+        0x20 => "ERROR_SHARING_VIOLATION - disk or volume is in use; close other disk tools",
+        0x05 => "ERROR_ACCESS_DENIED - run as Administrator",
+        0x02 => "ERROR_FILE_NOT_FOUND - check device path",
         _ => "CreateFileW failed",
     }
 }

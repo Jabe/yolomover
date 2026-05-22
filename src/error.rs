@@ -15,7 +15,7 @@ pub enum YoloError {
     #[error("disk {disk_index} is MBR; yolomover only supports GPT")]
     MbrDisk { disk_index: u32 },
 
-    #[error("no Windows Recovery partition (type DE94BBA4-…) found on disk {disk_index}")]
+    #[error("no Windows Recovery partition (type DE94BBA4-...) found on disk {disk_index}")]
     RecoveryNotFound { disk_index: u32 },
 
     #[error("multiple recovery partitions on disk {disk_index}; refusing to guess")]

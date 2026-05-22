@@ -54,7 +54,7 @@ pub fn confirm_run(plan: &RelocationPlan) -> Result<()> {
 
 pub fn run_relocation(plan: &RelocationPlan, dry_run: bool) -> Result<()> {
     if dry_run {
-        info!("dry run — skipping relocation");
+        info!("dry run - skipping relocation");
         return Ok(());
     }
     let mut disk = PhysicalDisk::open(plan.disk.disk_index)?;
@@ -90,7 +90,7 @@ pub fn run_workflow(
         set_reimage_path(plan.disk.disk_index, plan.recovery.index)?;
         enable_winre()?;
     } else {
-        info!("recovery already at end — skipping relocation");
+        info!("recovery already at end - skipping relocation");
     }
 
     let winre_verified = verify_winre_enabled()?;
