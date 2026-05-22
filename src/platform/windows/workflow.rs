@@ -107,7 +107,8 @@ pub fn relocate_workflow(plan: &RelocationPlan, dry_run: bool) -> Result<Relocat
             disable_winre()?;
         }
         run_relocation(plan, false)?;
-        set_reimage_path(plan.disk.disk_index, plan.recovery.index)?;
+        let win_part = plan.disk.windows_partition_number(&plan.recovery);
+        set_reimage_path(plan.disk.disk_index, win_part)?;
         enable_winre()?;
     } else {
         info!("recovery already at end - skipping relocation");

@@ -69,10 +69,10 @@ pub fn verify_winre_enabled() -> Result<bool> {
     Ok(status.enabled)
 }
 
-/// Point WinRE at recovery path after partition move.
-pub fn set_reimage_path(disk_index: u32, partition_index: u32) -> Result<()> {
+/// Point WinRE at recovery path after partition move (`partition_number` is 1-based, diskpart order).
+pub fn set_reimage_path(disk_index: u32, partition_number: u32) -> Result<()> {
     let path = format!(
-        r"\\?\GLOBALROOT\device\harddisk{disk_index}\partition{partition_index}\Recovery\WindowsRE"
+        r"\\?\GLOBALROOT\device\harddisk{disk_index}\partition{partition_number}\Recovery\WindowsRE"
     );
     info!(%path, "reagentc /setreimage");
     run_reagentc(&["/setreimage", "/path", &path]).map(|_| ())

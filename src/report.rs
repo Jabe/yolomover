@@ -50,7 +50,11 @@ pub fn print_disk_layout(layout: &DiskLayout) {
         );
     }
     if let Some(r) = &layout.recovery {
-        println!("  Recovery:    partition {}", r.index);
+        println!(
+            "  Recovery:    GPT slot {} (Windows partition {})",
+            r.index,
+            layout.windows_partition_number(r)
+        );
     } else {
         println!("  Recovery:    NOT FOUND");
     }

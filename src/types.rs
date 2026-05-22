@@ -29,6 +29,18 @@ impl DiskLayout {
     pub fn recovery_index(&self) -> Option<u32> {
         self.recovery.as_ref().map(|p| p.index)
     }
+
+    /// 1-based partition number for `\\.\harddiskN\partitionM` (disk offset order, not GPT slot index).
+    pub fn windows_partition_number(&self, entry: &GptPartitionEntry) -> u32 {
+        let mut used: Vec<_> = self.partitions.iter().filter(|p| !p.is_unused()).collect();
+        used.sort_by_key(|p| p.first_lba);
+        for (i, p) in used.iter().enumerate() {
+            if p.index == entry.index {
+                return (i + 1) as u32;
+            }
+        }
+        entry.index.saturating_add(1)
+    }
 }
 
 /// Planned relocation for the recovery partition.
@@ -58,6 +70,69 @@ impl RelocationPlan {
 pub struct RelocateSummary {
     pub relocated: bool,
     pub winre_verified: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gpt::{GptGuid, GptPartitionEntry, RECOVERY_TYPE_GUID};
+
+    #[test]
+    fn windows_partition_number_orders_by_lba_not_gpt_slot() {
+        let recovery = GptPartitionEntry {
+            index: 3,
+            type_guid: GptGuid::parse_str(RECOVERY_TYPE_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            first_lba: 10_000,
+            last_lba: 11_000,
+            attributes: 0,
+            name: "Recovery".into(),
+        };
+        let layout = DiskLayout {
+            disk_index: 0,
+            disk_path: "\\\\.\\PhysicalDrive0".into(),
+            is_gpt: true,
+            disk_size_bytes: 0,
+            sector_size: 512,
+            header_first_usable: 34,
+            header_last_usable: 0,
+            stale_primary_gpt: false,
+            partitions: vec![
+                GptPartitionEntry {
+                    index: 0,
+                    type_guid: GptGuid::parse_str(crate::gpt::ESP_TYPE_GUID).unwrap(),
+                    unique_guid: GptGuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                    first_lba: 2048,
+                    last_lba: 3000,
+                    attributes: 0,
+                    name: "EFI".into(),
+                },
+                GptPartitionEntry {
+                    index: 1,
+                    type_guid: GptGuid::parse_str("E3C9E316-0B5C-4DB8-817D-F92DF00215AE").unwrap(),
+                    unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                    first_lba: 3001,
+                    last_lba: 3100,
+                    attributes: 0,
+                    name: "MSR".into(),
+                },
+                GptPartitionEntry {
+                    index: 2,
+                    type_guid: GptGuid::parse_str(crate::gpt::MS_BASIC_DATA_GUID).unwrap(),
+                    unique_guid: GptGuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+                    first_lba: 3101,
+                    last_lba: 9000,
+                    attributes: 0,
+                    name: "OS".into(),
+                },
+                recovery.clone(),
+            ],
+            recovery: Some(recovery.clone()),
+            boot_partition: None,
+        };
+        let r = layout.recovery.as_ref().unwrap();
+        assert_eq!(layout.windows_partition_number(r), 4);
+    }
 }
 
 impl fmt::Display for WinReStatus {
