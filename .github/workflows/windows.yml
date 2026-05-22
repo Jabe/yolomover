@@ -3,8 +3,12 @@ name: Windows binary
 on:
   push:
     branches: [master, main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,14 +38,23 @@ jobs:
         run: |
           $src = "target/release/yolomover.exe"
           if (-not (Test-Path $src)) { throw "Missing $src" }
-          $dest = "dist/yolomover-x86_64-pc-windows-msvc.exe"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $src $dest
-          (Get-Item $dest).Length | Out-File -FilePath dist/size.txt
+          Copy-Item $src "dist/yolomover-x86_64-pc-windows-msvc.exe"
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            Copy-Item $src "dist/yolomover-$($env:GITHUB_REF_NAME)-x86_64-pc-windows-msvc.exe"
+          }
 
-      - name: Upload Windows binary
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v6
         with:
           name: yolomover-windows-x86_64
           path: dist/yolomover-x86_64-pc-windows-msvc.exe
           if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/yolomover-${{ github.ref_name }}-x86_64-pc-windows-msvc.exe
+          draft: false
+          prerelease: false

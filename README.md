@@ -73,11 +73,11 @@ cargo test
 
 ### CI binary (GitHub Actions)
 
-Every push to `master` builds on `windows-2025` and uploads an artifact:
+Every push to `master` builds on `windows-2025` and uploads a workflow artifact.
 
-**`yolomover-windows-x86_64`** → `yolomover-x86_64-pc-windows-msvc.exe`
+**Tagged releases** (`v*`) attach the Windows binary to the [GitHub Release](https://github.com/Jabe/yolomover/releases) automatically, e.g. `yolomover-v1.0.0-x86_64-pc-windows-msvc.exe`.
 
-Download: GitHub repo → **Actions** → latest **Windows binary** run → **Artifacts**.
+For untagged builds: repo → **Actions** → latest run → artifact **`yolomover-windows-x86_64`**.
 
 Cross-compile locally:
 
