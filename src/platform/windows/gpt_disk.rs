@@ -2,7 +2,7 @@
 
 use crate::error::{Result, YoloError};
 use crate::gpt::{
-    backup_header_lba_for_disk_sectors, disk_sector_count, efi_crc32,
+    backup_header_lba_for_disk_sectors, disk_sector_count, efi_crc32, gpt_header_crc_valid,
     last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS,
     PARTITION_COUNT, PARTITION_ENTRY_SIZE, SECTOR_SIZE,
 };
@@ -79,16 +79,16 @@ impl GptOnDisk {
         info!("writing backup GPT partition array");
         disk.write_sectors(self.backup_entry_lba, PARTITION_ARRAY_SECTORS, &entries_raw)?;
 
-        let mut primary_sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
+        let mut primary_sector = vec![0u8; SECTOR_SIZE as usize];
         self.primary_header.write_to_sector(&mut primary_sector)?;
         disk.write_sectors(PRIMARY_HEADER_LBA, 1, &primary_sector)?;
 
         let backup_header = self.backup_header();
-        let mut backup_sector = disk.read_one_sector(self.backup_header_lba)?;
+        let mut backup_sector = vec![0u8; SECTOR_SIZE as usize];
         backup_header.write_to_sector(&mut backup_sector)?;
         disk.write_sectors(self.backup_header_lba, 1, &backup_sector)?;
 
-        self.verify_crc(&entries_raw, &primary_sector, &backup_sector)?;
+        self.verify_crc(disk, &entries_raw)?;
         info!("GPT tables committed with valid header CRCs");
         Ok(())
     }
@@ -125,12 +125,7 @@ impl GptOnDisk {
         Ok(raw)
     }
 
-    fn verify_crc(
-        &self,
-        entries_raw: &[u8],
-        primary_sector: &[u8],
-        backup_sector: &[u8],
-    ) -> Result<()> {
+    fn verify_crc(&self, disk: &mut PhysicalDisk, entries_raw: &[u8]) -> Result<()> {
         let array_crc = efi_crc32(entries_raw);
         if array_crc != self.primary_header.partition_array_crc32 {
             return Err(YoloError::GptInvalid {
@@ -138,22 +133,14 @@ impl GptOnDisk {
             });
         }
         let hdr_size = self.primary_header.header_size as usize;
-        let stored_primary = u32::from_le_bytes(primary_sector[16..20].try_into().map_err(|_| {
-            YoloError::GptInvalid {
-                detail: "primary header CRC field missing".into(),
-            }
-        })?);
-        if efi_crc32(&primary_sector[..hdr_size]) != stored_primary {
+        let primary_sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
+        if !gpt_header_crc_valid(&primary_sector, hdr_size) {
             return Err(YoloError::GptInvalid {
                 detail: "primary header CRC mismatch after write".into(),
             });
         }
-        let stored_backup = u32::from_le_bytes(backup_sector[16..20].try_into().map_err(|_| {
-            YoloError::GptInvalid {
-                detail: "backup header CRC field missing".into(),
-            }
-        })?);
-        if efi_crc32(&backup_sector[..hdr_size]) != stored_backup {
+        let backup_sector = disk.read_one_sector(self.backup_header_lba)?;
+        if !gpt_header_crc_valid(&backup_sector, hdr_size) {
             return Err(YoloError::GptInvalid {
                 detail: "backup header CRC mismatch after write".into(),
             });

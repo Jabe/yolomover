@@ -5,7 +5,7 @@
 mod crc;
 mod range;
 
-pub use crc::efi_crc32;
+pub use crc::{efi_crc32, gpt_header_crc_valid};
 pub use range::LbaRange;
 
 use crate::error::{Result, YoloError};
