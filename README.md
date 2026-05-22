@@ -58,7 +58,15 @@ cargo build
 cargo test
 ```
 
-Cross-compile for Windows:
+### CI binary (GitHub Actions)
+
+Every push to `master` builds on `windows-latest` and uploads an artifact:
+
+**`yolomover-windows-x86_64`** → `yolomover-x86_64-pc-windows-msvc.exe`
+
+Download: GitHub repo → **Actions** → latest **Windows binary** run → **Artifacts**.
+
+Cross-compile locally:
 
 ```bash
 rustup target add x86_64-pc-windows-msvc

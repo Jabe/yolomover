@@ -3,7 +3,7 @@ use crate::platform::windows::disk::{is_elevated, system_disk_index, PhysicalDis
 use crate::platform::windows::extend::extend_boot_volume;
 use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::reagentc::{
-    disable_winre, enable_winre, query_winre, set_reimage_path, verify_winre_enabled,
+    self, disable_winre, enable_winre, set_reimage_path, verify_winre_enabled,
 };
 use crate::platform::windows::relocation::{execute_relocation, preflight};
 use crate::types::{DiskLayout, RelocationPlan, RunSummary, WinReStatus};
@@ -17,7 +17,7 @@ pub fn inspect_system_disk(disk_index: Option<u32>) -> Result<(DiskLayout, WinRe
     };
     let mut disk = PhysicalDisk::open_readonly(index)?;
     let layout = read_disk_layout(&mut disk)?;
-    let winre = query_winre()?;
+    let winre = reagentc::query_winre()?;
     Ok((layout, winre))
 }
 

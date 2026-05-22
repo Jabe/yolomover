@@ -3,7 +3,6 @@ use crate::gpt::SECTOR_SIZE;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::windows::io::FromRawHandle;
-use std::path::PathBuf;
 use tracing::debug;
 
 /// Handle to `\\.\PhysicalDriveN` with sector-aligned I/O.
@@ -159,7 +158,7 @@ pub fn system_disk_index() -> Result<u32> {
     };
     use windows::Win32::System::IO::DeviceIoControl;
 
-    let path: PathBuf = std::env::var("SystemDrive")
+    let path = std::env::var("SystemDrive")
         .map(|d| format!(r"\\.\{}", d.trim_end_matches(':')))
         .unwrap_or_else(|_| r"\\.\C:".to_string());
 
@@ -208,7 +207,7 @@ pub fn system_disk_index() -> Result<u32> {
 pub fn is_elevated() -> bool {
     // Admin check: open physical drive 0 for write would also fail, but explicit is clearer.
     unsafe {
-        use windows::Win32::Security::Authorization::IsUserAnAdmin;
+        use windows::Win32::UI::Shell::IsUserAnAdmin;
         IsUserAnAdmin().as_bool()
     }
 }

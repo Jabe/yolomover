@@ -6,12 +6,13 @@ use tracing::{debug, warn};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, FSCTL_DISMOUNT_VOLUME,
-    FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, FILE_ATTRIBUTE_NORMAL,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::{
-    DISK_EXTENT, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, VOLUME_DISK_EXTENTS,
+    DISK_EXTENT, FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
+    VOLUME_DISK_EXTENTS,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -29,7 +30,7 @@ impl VolumeGuard {
         let mut handles = Vec::new();
         let mut name = [0u16; VOLUME_NAME_CHARS];
 
-        let find = match unsafe { FindFirstVolumeW(PCWSTR(name.as_mut_ptr())) } {
+        let find = match unsafe { FindFirstVolumeW(&mut name) } {
             Ok(h) => h,
             Err(_) => {
                 debug!("no volumes enumerated");
@@ -41,7 +42,7 @@ impl VolumeGuard {
             if let Some(handle) = try_lock_volume(&name, disk_index, first_lba, last_lba)? {
                 handles.push(handle);
             }
-            if unsafe { FindNextVolumeW(find, PCWSTR(name.as_mut_ptr())) }.is_err() {
+            if unsafe { FindNextVolumeW(find, &mut name) }.is_err() {
                 break;
             }
         }
@@ -134,17 +135,24 @@ fn volume_overlaps(
     }
     let extents = unsafe { &*(buf.as_ptr() as *const VOLUME_DISK_EXTENTS) };
     for i in 0..extents.NumberOfDiskExtents as usize {
-        let ext = unsafe { extents.Extents[i] };
+        let ext = extents.Extents[i];
         if ext.DiskNumber != disk_index {
             continue;
         }
-        let start = ext.StartingOffset / 512;
-        let end = start + (ext.ExtentLength / 512).saturating_sub(1);
+        let start = sector_lba(ext.StartingOffset);
+        let end = start.saturating_add(sector_lba(ext.ExtentLength).saturating_sub(1));
         if first_lba <= end && start <= last_lba {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+fn sector_lba(byte_offset: i64) -> u64 {
+    if byte_offset <= 0 {
+        return 0;
+    }
+    (byte_offset as u64) / 512
 }
 
 fn lock_and_dismount(handle: std::os::windows::io::RawHandle, volume_name: &[u16]) -> Result<()> {
