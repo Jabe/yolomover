@@ -52,6 +52,7 @@ pub fn disable_winre() -> Result<()> {
 
 pub fn enable_winre() -> Result<()> {
     info!("enabling WinRE (reagentc /enable)");
+    eprintln!("Enabling WinRE (reagentc /enable) — this may take a few minutes...");
     run_reagentc(&["/enable"]).map(|_| ())
 }
 
