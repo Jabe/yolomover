@@ -118,7 +118,8 @@ pub struct GptHeader {
 }
 
 impl GptHeader {
-    pub const SIGNATURE: u64 = 0x0000_5452_4145_5046; // "EFI PART"
+    /// Bytes on disk: `45 46 49 20 50 41 52 54` → `"EFI PART"`.
+    pub const SIGNATURE: u64 = 0x5452_4150_2049_4645;
 
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < 92 {
@@ -308,6 +309,14 @@ pub fn copy_strategy(src: LbaRange, dst: LbaRange) -> CopyStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpt_signature_matches_efi_part() {
+        let on_disk = [0x45u8, 0x46, 0x49, 0x20, 0x50, 0x41, 0x52, 0x54];
+        let sig = u64::from_le_bytes(on_disk);
+        assert_eq!(sig, GptHeader::SIGNATURE);
+        assert_eq!(sig, 0x5452_4150_2049_4645);
+    }
 
     #[test]
     fn recovery_guid_matches() {
