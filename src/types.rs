@@ -53,12 +53,11 @@ impl RelocationPlan {
     }
 }
 
-/// Result of a completed run.
+/// Result of a completed relocation.
 #[derive(Debug, Clone)]
-pub struct RunSummary {
+pub struct RelocateSummary {
     pub relocated: bool,
     pub winre_verified: bool,
-    pub extended_c: bool,
 }
 
 impl fmt::Display for WinReStatus {

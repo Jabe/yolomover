@@ -8,7 +8,7 @@ pub fn print_banner() {
 ╔══════════════════════════════════════════════════════════════════╗
 ║  yolomover - HIGH RISK disk partition operation                  ║
 ║  Moving the Windows Recovery partition can brick WinRE or boot.  ║
-║  Ensure a full backup. Run inspect/plan before run.              ║
+║  Ensure a full backup. Run inspect/plan before relocate.         ║
 ╚══════════════════════════════════════════════════════════════════╝
 "#
     );
@@ -55,7 +55,25 @@ pub fn print_disk_layout(layout: &DiskLayout) {
         println!("  Recovery:    NOT FOUND");
     }
     if let Some(b) = &layout.boot_partition {
-        println!("  Boot (C:):   partition {}", b.index);
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        println!("  Boot volume: partition {} ({drive})", b.index);
+    }
+}
+
+pub fn print_extend_plan(layout: &DiskLayout) {
+    let letter = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let sectors = crate::platform::extendable_sectors_after_boot(layout);
+    println!("Extend plan for disk {}", layout.disk_index);
+    println!("  Boot volume: {letter}");
+    if sectors == 0 {
+        println!("  Status:      no contiguous unallocated space after boot volume");
+    } else {
+        println!(
+            "  Status:      CAN EXTEND by approx {} sectors ({:.1} MiB)",
+            sectors,
+            sectors as f64 * 512.0 / (1024.0 * 1024.0)
+        );
+        println!("  Command:     yolomover extend --yes");
     }
 }
 

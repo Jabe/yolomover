@@ -47,16 +47,19 @@ pub enum Command {
     Inspect,
     /// Dry-run: show relocation plan and validation
     Plan,
-    /// Execute: disable WinRE, relocate recovery, re-enable, optional extend
-    Run {
+    /// Move recovery to disk tail (disable WinRE, relocate, re-enable)
+    Relocate {
         /// Skip interactive confirmation (still requires explicit flag)
         #[arg(long)]
         yes: bool,
-        /// Extend the boot partition into space freed before recovery
-        #[arg(long)]
-        extend_c: bool,
         /// Plan only; do not write to disk or call reagentc disable/enable
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Extend the system boot volume into space after relocation
+    Extend {
+        /// Skip interactive confirmation (still requires explicit flag)
+        #[arg(long)]
+        yes: bool,
     },
 }

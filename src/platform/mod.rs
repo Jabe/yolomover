@@ -8,12 +8,12 @@ mod stub;
 
 #[cfg(windows)]
 pub use windows::{
-    confirm_run, extend_boot_partition, inspect_system_disk, query_winre, run_relocation,
-    run_workflow,
+    confirm_extend, confirm_relocate, extend_boot_partition, extendable_sectors_after_boot,
+    inspect_system_disk, query_winre, relocate_workflow,
 };
 
 #[cfg(not(windows))]
 pub use stub::{
-    confirm_run, extend_boot_partition, inspect_system_disk, query_winre, run_relocation,
-    run_workflow,
+    confirm_extend, confirm_relocate, extend_boot_partition, extendable_sectors_after_boot,
+    inspect_system_disk, query_winre, relocate_workflow,
 };

@@ -1,5 +1,5 @@
 use crate::error::{Result, YoloError};
-use crate::types::{DiskLayout, RelocationPlan, RunSummary, WinReStatus};
+use crate::types::{DiskLayout, RelocationPlan, RelocateSummary, WinReStatus};
 
 pub fn inspect_system_disk(_disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
     Err(YoloError::NotWindows)
@@ -9,11 +9,11 @@ pub fn query_winre() -> Result<WinReStatus> {
     Err(YoloError::NotWindows)
 }
 
-pub fn confirm_run(_plan: &RelocationPlan) -> Result<()> {
+pub fn confirm_relocate(_plan: &RelocationPlan) -> Result<()> {
     Err(YoloError::NotWindows)
 }
 
-pub fn run_relocation(_plan: &RelocationPlan, _dry_run: bool) -> Result<()> {
+pub fn confirm_extend(_layout: &DiskLayout) -> Result<()> {
     Err(YoloError::NotWindows)
 }
 
@@ -21,10 +21,10 @@ pub fn extend_boot_partition(_layout: &DiskLayout) -> Result<()> {
     Err(YoloError::NotWindows)
 }
 
-pub fn run_workflow(
-    _plan: &RelocationPlan,
-    _dry_run: bool,
-    _extend_c: bool,
-) -> Result<RunSummary> {
+pub fn extendable_sectors_after_boot(_layout: &DiskLayout) -> u64 {
+    0
+}
+
+pub fn relocate_workflow(_plan: &RelocationPlan, _dry_run: bool) -> Result<RelocateSummary> {
     Err(YoloError::NotWindows)
 }
