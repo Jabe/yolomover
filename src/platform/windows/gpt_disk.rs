@@ -1,0 +1,154 @@
+//! Read/write GPT partition entry arrays and headers (primary + backup).
+
+use crate::error::{Result, YoloError};
+use crate::gpt::{
+    efi_crc32, GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS, PARTITION_COUNT,
+    PARTITION_ENTRY_SIZE, SECTOR_SIZE,
+};
+use crate::platform::windows::disk::PhysicalDisk;
+use tracing::info;
+
+const PRIMARY_HEADER_LBA: u64 = 1;
+
+pub struct GptOnDisk {
+    pub primary_header: GptHeader,
+    pub entries: Vec<GptPartitionEntry>,
+    pub entry_lba: u64,
+    pub backup_header_lba: u64,
+    pub backup_entry_lba: u64,
+}
+
+impl GptOnDisk {
+    pub fn load(disk: &mut PhysicalDisk) -> Result<Self> {
+        let sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
+        let primary_header = GptHeader::parse(&sector)?;
+        let entry_lba = primary_header.partition_entry_lba;
+        let backup_header_lba = primary_header.backup_lba;
+        let backup_entry_lba = backup_header_lba.saturating_sub(PARTITION_ARRAY_SECTORS);
+
+        let mut raw = vec![0u8; partition_array_bytes()];
+        disk.read_sectors(entry_lba, PARTITION_ARRAY_SECTORS, &mut raw)?;
+
+        let mut entries = Vec::new();
+        for i in 0..primary_header.partition_count as usize {
+            let off = i * PARTITION_ENTRY_SIZE;
+            let slice = &raw[off..off + PARTITION_ENTRY_SIZE];
+            let entry = GptPartitionEntry::parse(i as u32, slice)?;
+            entries.push(entry);
+        }
+
+        Ok(Self {
+            primary_header,
+            entries,
+            entry_lba,
+            backup_header_lba,
+            backup_entry_lba,
+        })
+    }
+
+    pub fn update_recovery_lbas(
+        &mut self,
+        recovery_index: u32,
+        new_first: u64,
+        new_last: u64,
+    ) -> Result<()> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|e| e.index == recovery_index)
+            .ok_or_else(|| YoloError::other(format!("partition {recovery_index} missing")))?;
+        entry.first_lba = new_first;
+        entry.last_lba = new_last;
+        Ok(())
+    }
+
+    /// Write partition arrays and refreshed headers to disk.
+    pub fn commit(&mut self, disk: &mut PhysicalDisk) -> Result<()> {
+        let entries_raw = self.serialize_entries()?;
+        self.primary_header = self
+            .primary_header
+            .clone()
+            .with_partition_array_crc(&entries_raw);
+
+        info!("writing primary GPT partition array");
+        disk.write_sectors(self.entry_lba, PARTITION_ARRAY_SECTORS, &entries_raw)?;
+
+        info!("writing backup GPT partition array");
+        disk.write_sectors(self.backup_entry_lba, PARTITION_ARRAY_SECTORS, &entries_raw)?;
+
+        let mut primary_sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
+        self.primary_header.write_to_sector(&mut primary_sector)?;
+        disk.write_sectors(PRIMARY_HEADER_LBA, 1, &primary_sector)?;
+
+        let backup_header = self.backup_header();
+        let mut backup_sector = disk.read_one_sector(self.backup_header_lba)?;
+        backup_header.write_to_sector(&mut backup_sector)?;
+        disk.write_sectors(self.backup_header_lba, 1, &backup_sector)?;
+
+        self.verify_crc(&entries_raw, &primary_sector, &backup_sector)?;
+        info!("GPT tables committed with valid header CRCs");
+        Ok(())
+    }
+
+    fn backup_header(&self) -> GptHeader {
+        let mut h = self.primary_header.clone();
+        h.current_lba = self.backup_header_lba;
+        h.backup_lba = PRIMARY_HEADER_LBA;
+        h.partition_entry_lba = self.backup_entry_lba;
+        h
+    }
+
+    fn serialize_entries(&self) -> Result<Vec<u8>> {
+        let mut raw = vec![0u8; partition_array_bytes()];
+        for entry in &self.entries {
+            if entry.index as usize >= PARTITION_COUNT {
+                return Err(YoloError::GptInvalid {
+                    detail: format!("partition index {} out of range", entry.index),
+                });
+            }
+            let off = entry.index as usize * PARTITION_ENTRY_SIZE;
+            entry.write_raw(&mut raw[off..off + PARTITION_ENTRY_SIZE]);
+        }
+        Ok(raw)
+    }
+
+    fn verify_crc(
+        &self,
+        entries_raw: &[u8],
+        primary_sector: &[u8],
+        backup_sector: &[u8],
+    ) -> Result<()> {
+        let array_crc = efi_crc32(entries_raw);
+        if array_crc != self.primary_header.partition_array_crc32 {
+            return Err(YoloError::GptInvalid {
+                detail: "partition array CRC mismatch after write".into(),
+            });
+        }
+        let hdr_size = self.primary_header.header_size as usize;
+        let stored_primary = u32::from_le_bytes(primary_sector[16..20].try_into().map_err(|_| {
+            YoloError::GptInvalid {
+                detail: "primary header CRC field missing".into(),
+            }
+        })?);
+        if efi_crc32(&primary_sector[..hdr_size]) != stored_primary {
+            return Err(YoloError::GptInvalid {
+                detail: "primary header CRC mismatch after write".into(),
+            });
+        }
+        let stored_backup = u32::from_le_bytes(backup_sector[16..20].try_into().map_err(|_| {
+            YoloError::GptInvalid {
+                detail: "backup header CRC field missing".into(),
+            }
+        })?);
+        if efi_crc32(&backup_sector[..hdr_size]) != stored_backup {
+            return Err(YoloError::GptInvalid {
+                detail: "backup header CRC mismatch after write".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn partition_array_bytes() -> usize {
+    (PARTITION_ARRAY_SECTORS * SECTOR_SIZE) as usize
+}
