@@ -18,6 +18,8 @@ pub struct DiskLayout {
     pub sector_size: u64,
     pub header_first_usable: u64,
     pub header_last_usable: u64,
+    /// Primary GPT header describes a smaller disk than the device.
+    pub stale_primary_gpt: bool,
     pub partitions: Vec<GptPartitionEntry>,
     pub recovery: Option<GptPartitionEntry>,
     pub boot_partition: Option<GptPartitionEntry>,

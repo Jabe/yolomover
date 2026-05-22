@@ -2,8 +2,9 @@
 
 use crate::error::{Result, YoloError};
 use crate::gpt::{
-    efi_crc32, GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS, PARTITION_COUNT,
-    PARTITION_ENTRY_SIZE, SECTOR_SIZE,
+    backup_header_lba_for_disk_sectors, disk_sector_count, efi_crc32,
+    last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS,
+    PARTITION_COUNT, PARTITION_ENTRY_SIZE, SECTOR_SIZE,
 };
 use crate::platform::windows::disk::PhysicalDisk;
 use tracing::info;
@@ -23,7 +24,8 @@ impl GptOnDisk {
         let sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
         let primary_header = GptHeader::parse(&sector)?;
         let entry_lba = primary_header.partition_entry_lba;
-        let backup_header_lba = primary_header.backup_lba;
+        let disk_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
+        let backup_header_lba = backup_header_lba_for_disk_sectors(disk_sectors);
         let backup_entry_lba = backup_header_lba.saturating_sub(PARTITION_ARRAY_SECTORS);
 
         let mut raw = vec![0u8; partition_array_bytes()];
@@ -64,6 +66,7 @@ impl GptOnDisk {
 
     /// Write partition arrays and refreshed headers to disk.
     pub fn commit(&mut self, disk: &mut PhysicalDisk) -> Result<()> {
+        self.sync_device_geometry(disk);
         let entries_raw = self.serialize_entries()?;
         self.primary_header = self
             .primary_header
@@ -88,6 +91,16 @@ impl GptOnDisk {
         self.verify_crc(&entries_raw, &primary_sector, &backup_sector)?;
         info!("GPT tables committed with valid header CRCs");
         Ok(())
+    }
+
+    fn sync_device_geometry(&mut self, disk: &PhysicalDisk) {
+        let disk_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
+        self.backup_header_lba = backup_header_lba_for_disk_sectors(disk_sectors);
+        self.backup_entry_lba = self
+            .backup_header_lba
+            .saturating_sub(PARTITION_ARRAY_SECTORS);
+        self.primary_header.backup_lba = self.backup_header_lba;
+        self.primary_header.last_usable_lba = last_usable_lba_for_disk_sectors(disk_sectors);
     }
 
     fn backup_header(&self) -> GptHeader {

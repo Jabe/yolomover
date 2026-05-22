@@ -87,7 +87,46 @@ impl PhysicalDisk {
 }
 
 fn probe_size(file: &File, path: &str) -> Result<u64> {
-    // Primary GPT header at LBA 1 contains backup_lba (= last sector of disk).
+    // Prefer IOCTL device length; the primary GPT header may lag behind an expanded disk.
+    if let Ok(len) = probe_size_ioctl(file, path) {
+        return Ok(len);
+    }
+    probe_size_from_primary_gpt(file, path)
+}
+
+fn probe_size_ioctl(file: &File, path: &str) -> Result<u64> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Ioctl::{GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO};
+    use windows::Win32::System::IO::DeviceIoControl;
+
+    let mut info = GET_LENGTH_INFORMATION::default();
+    let mut returned = 0u32;
+    let handle = HANDLE(file.as_raw_handle() as _);
+    unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_DISK_GET_LENGTH_INFO,
+            None,
+            0,
+            Some(&mut info as *mut _ as *mut _),
+            std::mem::size_of::<GET_LENGTH_INFORMATION>() as u32,
+            Some(&mut returned),
+            None,
+        )
+        .map_err(|e| YoloError::WindowsApi {
+            detail: format!("IOCTL_DISK_GET_LENGTH_INFO on {path:?}: {}", e.code().0),
+        })?;
+    }
+    if info.Length <= 0 {
+        return Err(YoloError::WindowsApi {
+            detail: format!("IOCTL_DISK_GET_LENGTH_INFO returned non-positive length on {path:?}"),
+        });
+    }
+    Ok(info.Length as u64)
+}
+
+fn probe_size_from_primary_gpt(file: &File, path: &str) -> Result<u64> {
     let mut sector = vec![0u8; SECTOR_SIZE as usize];
     let mut f = file;
     f.seek(SeekFrom::Start(SECTOR_SIZE))

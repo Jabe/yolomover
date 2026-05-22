@@ -170,6 +170,7 @@ mod tests {
             sector_size: 512,
             header_first_usable: 34,
             header_last_usable: last_usable,
+            stale_primary_gpt: false,
             partitions: vec![recovery.clone()],
             recovery: Some(recovery),
             boot_partition: None,
@@ -210,6 +211,7 @@ mod tests {
             sector_size: 512,
             header_first_usable: 34,
             header_last_usable: last_usable,
+            stale_primary_gpt: false,
             partitions: vec![boot.clone(), recovery.clone()],
             recovery: Some(recovery),
             boot_partition: Some(boot),
@@ -220,8 +222,53 @@ mod tests {
     }
 
     #[test]
+    fn expanded_disk_stale_primary_gpt_plans_move() {
+        // Device is larger than the primary GPT header reports.
+        let boot_last = 132_601_855u64;
+        let recovery_first = 132_601_856u64;
+        let recovery_last = 134_213_631u64;
+        let device_sectors = 146_800_640u64;
+        let last_usable = device_sectors - 34;
+        let boot = GptPartitionEntry {
+            index: 2,
+            type_guid: GptGuid::parse_str(crate::gpt::MS_BASIC_DATA_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+            first_lba: 444_416,
+            last_lba: boot_last,
+            attributes: 0,
+            name: "OS".into(),
+        };
+        let recovery = GptPartitionEntry {
+            index: 3,
+            type_guid: GptGuid::parse_str(RECOVERY_TYPE_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            first_lba: recovery_first,
+            last_lba: recovery_last,
+            attributes: 0,
+            name: "Recovery".into(),
+        };
+        let layout = DiskLayout {
+            disk_index: 0,
+            disk_path: "\\\\.\\PhysicalDrive0".into(),
+            is_gpt: true,
+            disk_size_bytes: device_sectors * 512,
+            sector_size: 512,
+            header_first_usable: 34,
+            header_last_usable: last_usable,
+            stale_primary_gpt: true,
+            partitions: vec![boot.clone(), recovery.clone()],
+            recovery: Some(recovery),
+            boot_partition: Some(boot),
+        };
+        let plan = build_relocation_plan(&layout).unwrap();
+        assert!(!plan.already_at_end);
+        assert!(plan.needs_move());
+        assert!(crate::plan::slack_after_recovery(&layout, &plan.recovery) > 12_000_000);
+    }
+
+    #[test]
     fn sharevm_like_layout_needs_no_move() {
-        // 64 GiB VM baseline: recovery already after C:, ~2 MiB slack at tail.
+        // Recovery at disk tail with only alignment slack after it.
         let boot_last = 132_808_703u64;
         let recovery_first = 132_808_704u64;
         let recovery_last = 134_213_631u64;
@@ -252,6 +299,7 @@ mod tests {
             sector_size: 512,
             header_first_usable: 34,
             header_last_usable: last_usable,
+            stale_primary_gpt: false,
             partitions: vec![boot.clone(), recovery.clone()],
             recovery: Some(recovery),
             boot_partition: Some(boot),

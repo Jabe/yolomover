@@ -271,6 +271,21 @@ pub enum CopyStrategy {
     Buffered,
 }
 
+/// Sector count for a disk given its size in bytes.
+pub fn disk_sector_count(disk_size_bytes: u64, sector_size: u64) -> u64 {
+    disk_size_bytes / sector_size.max(SECTOR_SIZE)
+}
+
+/// Last usable LBA per EFI layout (backup partition array + header at disk end).
+pub fn last_usable_lba_for_disk_sectors(disk_sectors: u64) -> u64 {
+    disk_sectors.saturating_sub(34)
+}
+
+/// LBA of the backup GPT header.
+pub fn backup_header_lba_for_disk_sectors(disk_sectors: u64) -> u64 {
+    disk_sectors.saturating_sub(1)
+}
+
 /// Align `value` down to `align` (must be power of two).
 pub fn align_down(value: u64, align: u64) -> u64 {
     value & !(align - 1)
@@ -303,6 +318,17 @@ pub fn copy_strategy(src: LbaRange, dst: LbaRange) -> CopyStrategy {
         CopyStrategy::Reverse
     } else {
         CopyStrategy::Buffered
+    }
+}
+
+#[cfg(test)]
+mod disk_geometry {
+    use super::*;
+
+    #[test]
+    fn last_usable_matches_sharevm_64gib() {
+        let sectors = 134_217_728u64;
+        assert_eq!(last_usable_lba_for_disk_sectors(sectors), 134_217_694);
     }
 }
 

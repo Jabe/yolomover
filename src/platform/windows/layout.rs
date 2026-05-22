@@ -1,7 +1,7 @@
 use crate::error::{Result, YoloError};
 use crate::gpt::{
-    GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS, PARTITION_COUNT, PARTITION_ENTRY_SIZE,
-    SECTOR_SIZE,
+    disk_sector_count, last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry,
+    PARTITION_ARRAY_SECTORS, PARTITION_COUNT, PARTITION_ENTRY_SIZE, SECTOR_SIZE,
 };
 use crate::platform::windows::disk::PhysicalDisk;
 use crate::types::DiskLayout;
@@ -62,6 +62,22 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
         "parsed layout"
     );
 
+    let device_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
+    let gpt_sectors = header.backup_lba.saturating_add(1);
+    let stale_primary_gpt = device_sectors > gpt_sectors;
+    let header_last_usable = last_usable_lba_for_disk_sectors(device_sectors);
+
+    if stale_primary_gpt {
+        debug!(
+            disk = disk.index,
+            gpt_sectors,
+            device_sectors,
+            primary_last_usable = header.last_usable_lba,
+            effective_last_usable = header_last_usable,
+            "primary GPT header smaller than device; using device size"
+        );
+    }
+
     Ok(DiskLayout {
         disk_index: disk.index,
         disk_path: disk.path.clone(),
@@ -69,7 +85,8 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
         disk_size_bytes: disk.size_bytes,
         sector_size: disk.sector_size,
         header_first_usable: header.first_usable_lba,
-        header_last_usable: header.last_usable_lba,
+        header_last_usable,
+        stale_primary_gpt,
         partitions,
         recovery,
         boot_partition,

@@ -29,6 +29,9 @@ pub fn print_disk_layout(layout: &DiskLayout) {
         "  Usable LBA:  {} .. {}",
         layout.header_first_usable, layout.header_last_usable
     );
+    if layout.stale_primary_gpt {
+        println!("  Note:        primary GPT header is stale; using device size for planning");
+    }
     println!("  Partitions:");
     for p in &layout.partitions {
         if p.is_unused() {
