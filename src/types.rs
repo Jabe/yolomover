@@ -1,7 +1,7 @@
 use crate::gpt::{CopyStrategy, GptPartitionEntry};
 use std::fmt;
 
-/// Raw `reagentc /info` text (shown for humans; verification uses partition file inspection).
+/// Output of `reagentc /info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinReStatus {
     pub raw_output: String,
@@ -169,6 +169,6 @@ mod tests {
 
 impl fmt::Display for WinReStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WinRE (reagentc /info below)")
+        write!(f, "WinRE")
     }
 }

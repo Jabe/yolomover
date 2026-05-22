@@ -1,4 +1,4 @@
-//! Inspect the recovery partition on disk (no reagentc/diskpart output parsing).
+//! Inspect the recovery partition on disk.
 
 use crate::error::{Result, YoloError};
 use crate::types::WinRePartitionInspect;

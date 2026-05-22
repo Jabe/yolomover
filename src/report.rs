@@ -126,7 +126,6 @@ fn partition_flags(p: &crate::gpt::GptPartitionEntry) -> String {
 }
 
 pub fn print_winre(status: &WinReStatus) {
-    println!("WinRE: {} (informational only)", status);
     if !status.raw_output.trim().is_empty() {
         println!("--- reagentc /info ---");
         println!("{}", status.raw_output.trim());

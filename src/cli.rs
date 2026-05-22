@@ -28,8 +28,6 @@ impl LogLevel {
     version,
     about = "Move Windows Recovery partition to end of disk (dangerous)",
     long_about = "Move the Windows Recovery (WinRE) partition to the disk tail so the boot volume can grow.\n\n\
-        Verification uses on-disk checks (winre.wim on the recovery partition, GPT boot extent after extend), \
-        not parsing reagentc or diskpart text. `reagentc /info` is shown for humans only.\n\n\
         Typical flow: inspect → plan → relocate --yes → extend --yes"
 )]
 pub struct Cli {
@@ -46,9 +44,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Read-only: GPT layout, recovery files (winre.wim), reagentc /info, extend plan
+    /// Read-only: GPT layout, recovery files, WinRE status, extend plan
     Inspect,
-    /// Dry-run: relocation plan and validation (no disk or reagentc changes)
+    /// Dry-run: relocation plan and validation
     Plan,
     /// Move recovery to disk tail (disable WinRE, relocate, re-enable; enable may take minutes)
     Relocate {
@@ -59,7 +57,7 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Extend boot volume (%SystemDrive%); success verified by GPT growth
+    /// Extend boot volume (%SystemDrive%) into adjacent free space
     Extend {
         /// Skip interactive confirmation (still requires explicit flag)
         #[arg(long)]

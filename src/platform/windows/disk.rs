@@ -84,6 +84,36 @@ impl PhysicalDisk {
         self.read_sectors(lba, 1, &mut buf)?;
         Ok(buf)
     }
+
+    /// Notify the storage stack that the on-disk partition table changed.
+    pub fn update_properties(&self) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Ioctl::IOCTL_DISK_UPDATE_PROPERTIES;
+        use windows::Win32::System::IO::DeviceIoControl;
+
+        let handle = HANDLE(self.file.as_raw_handle() as _);
+        unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_DISK_UPDATE_PROPERTIES,
+                None,
+                0,
+                None,
+                0,
+                None,
+                None,
+            )
+            .map_err(|e| YoloError::WindowsApi {
+                detail: format!(
+                    "IOCTL_DISK_UPDATE_PROPERTIES on {}: {}",
+                    self.path,
+                    e.code().0
+                ),
+            })?;
+        }
+        Ok(())
+    }
 }
 
 fn probe_size(file: &File, path: &str) -> Result<u64> {
@@ -212,7 +242,7 @@ fn win32_error_code(code: u32) -> u32 {
 /// `\\.\X:` device path for the system volume (`SystemDrive`, e.g. `\\.\C:`).
 ///
 /// The trailing colon is required by `CreateFileW`; `\\.\C` is invalid.
-fn system_volume_device_path() -> String {
+pub(crate) fn system_volume_device_path() -> String {
     match std::env::var("SystemDrive") {
         Ok(drive) => {
             let letter = drive.trim_end_matches(':');

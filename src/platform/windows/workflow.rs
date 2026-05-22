@@ -59,7 +59,7 @@ pub fn confirm_extend(layout: &DiskLayout) -> Result<()> {
     let sectors = extendable_sectors_after_boot(layout);
     eprintln!();
     eprintln!("About to:");
-    eprintln!("  Extend boot volume {letter} via diskpart");
+    eprintln!("  Extend boot volume {letter} (GPT grow + NTFS extend)");
     eprintln!(
         "  Contiguous unallocated after boot (approx): {:.1} MiB",
         sectors as f64 * 512.0 / (1024.0 * 1024.0)
