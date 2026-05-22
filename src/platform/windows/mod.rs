@@ -1,4 +1,5 @@
 mod disk;
+mod diskpart_cmd;
 mod extend;
 mod gpt_disk;
 mod layout;

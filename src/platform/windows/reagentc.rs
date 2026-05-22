@@ -1,8 +1,9 @@
 use crate::error::{Result, YoloError};
+use crate::platform::windows::diskpart_cmd::run_diskpart;
 use crate::types::WinReStatus;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{info, warn};
 
 fn reagentc_path() -> PathBuf {
     let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
@@ -16,7 +17,6 @@ fn run_reagentc(args: &[&str]) -> Result<String> {
             detail: format!("reagentc not found at {}", exe.display()),
         });
     }
-    debug!(?args, "reagentc");
     let output = Command::new(&exe)
         .args(args)
         .output()
@@ -42,13 +42,15 @@ fn run_reagentc(args: &[&str]) -> Result<String> {
 pub fn query_winre() -> Result<WinReStatus> {
     let raw = run_reagentc(&["/info"])?;
     let enabled = parse_enabled(&raw);
-    Ok(WinReStatus { enabled, raw_output: raw })
+    Ok(WinReStatus {
+        enabled,
+        raw_output: raw,
+    })
 }
 
 fn parse_enabled(output: &str) -> bool {
     let lower = output.to_lowercase();
-    // Typical: "Windows RE status: Enabled"
-    if lower.contains("windows re status:") {
+    if lower.contains("windows re status:") || lower.contains("windows re-status:") {
         return lower.contains("enabled") && !lower.contains("disabled");
     }
     lower.contains("enabled")
@@ -69,11 +71,90 @@ pub fn verify_winre_enabled() -> Result<bool> {
     Ok(status.enabled)
 }
 
-/// Point WinRE at recovery path after partition move (`partition_number` is 1-based, diskpart order).
-pub fn set_reimage_path(disk_index: u32, partition_number: u32) -> Result<()> {
-    let path = format!(
+fn recovery_globalroot_path(disk_index: u32, partition_number: u32) -> String {
+    format!(
         r"\\?\GLOBALROOT\device\harddisk{disk_index}\partition{partition_number}\Recovery\WindowsRE"
-    );
+    )
+}
+
+fn system_recovery_store() -> PathBuf {
+    PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+        .join("System32")
+        .join("Recovery")
+}
+
+/// Re-register WinRE after relocating the recovery partition.
+///
+/// `/disable` moves `winre.wim` to `%SystemRoot%\System32\Recovery`, so the copied
+/// recovery partition often has no image until `/enable` redeploys it.
+pub fn register_winre_after_relocate(disk_index: u32, partition_number: u32) -> Result<()> {
+    let _ = run_diskpart("rescan\nexit\n");
+
+    if enable_winre().is_ok() {
+        info!("WinRE enabled after relocation");
+        return Ok(());
+    }
+
+    warn!("reagentc /enable alone failed; copying WinRE image from System32\\Recovery");
+
+    copy_winre_store_to_recovery(disk_index, partition_number)?;
+
+    if set_reimage_path(disk_index, partition_number).is_ok() && enable_winre().is_ok() {
+        info!("WinRE registered via setreimage after copying image");
+        return Ok(());
+    }
+
+    warn!("setreimage on GLOBALROOT failed; trying temporary drive letter");
+    register_winre_via_drive_letter(disk_index, partition_number)
+}
+
+fn copy_winre_store_to_recovery(disk_index: u32, partition_number: u32) -> Result<()> {
+    let store = system_recovery_store();
+    let dest_root = recovery_globalroot_path(disk_index, partition_number);
+    let dest = Path::new(&dest_root);
+
+    std::fs::create_dir_all(dest).map_err(|e| YoloError::WinRe {
+        detail: format!("create {dest_root}: {e}"),
+    })?;
+
+    for name in ["winre.wim", "boot.sdi"] {
+        let src = store.join(name);
+        if !src.is_file() {
+            info!(file = name, "WinRE store file missing, skipping copy");
+            continue;
+        }
+        let dst = dest.join(name);
+        info!(from = %src.display(), to = %dst.display(), "copying WinRE file");
+        std::fs::copy(&src, &dst).map_err(|e| YoloError::WinRe {
+            detail: format!("copy {} -> {}: {e}", src.display(), dst.display()),
+        })?;
+    }
+    Ok(())
+}
+
+fn set_reimage_path(disk_index: u32, partition_number: u32) -> Result<()> {
+    let path = recovery_globalroot_path(disk_index, partition_number);
     info!(%path, "reagentc /setreimage");
     run_reagentc(&["/setreimage", "/path", &path]).map(|_| ())
+}
+
+/// Assign `R:` to recovery, setreimage on `R:\Recovery\WindowsRE`, then remove the letter.
+fn register_winre_via_drive_letter(disk_index: u32, partition_number: u32) -> Result<()> {
+    const LETTER: &str = "R";
+    let assign = format!(
+        "select disk {disk_index}\nselect partition {partition_number}\nassign letter={LETTER}\nexit\n"
+    );
+    run_diskpart(&assign)?;
+
+    let path = format!(r"{LETTER}:\Recovery\WindowsRE");
+    info!(%path, "reagentc /setreimage (mounted recovery)");
+    run_reagentc(&["/setreimage", "/path", &path])?;
+    enable_winre()?;
+
+    let remove = format!(
+        "select disk {disk_index}\nselect partition {partition_number}\nremove letter={LETTER}\nexit\n"
+    );
+    let _ = run_diskpart(&remove);
+    info!("WinRE registered via temporary drive letter");
+    Ok(())
 }

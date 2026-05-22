@@ -3,7 +3,7 @@ use crate::platform::windows::disk::{is_elevated, system_disk_index, PhysicalDis
 use crate::platform::windows::extend::{extend_boot_volume, extendable_sectors_after_boot};
 use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::reagentc::{
-    self, disable_winre, enable_winre, set_reimage_path, verify_winre_enabled,
+    self, disable_winre, register_winre_after_relocate, verify_winre_enabled,
 };
 use crate::platform::windows::relocation::{execute_relocation, preflight};
 use crate::types::{DiskLayout, RelocationPlan, RelocateSummary, WinReStatus};
@@ -108,8 +108,7 @@ pub fn relocate_workflow(plan: &RelocationPlan, dry_run: bool) -> Result<Relocat
         }
         run_relocation(plan, false)?;
         let win_part = plan.disk.windows_partition_number(&plan.recovery);
-        set_reimage_path(plan.disk.disk_index, win_part)?;
-        enable_winre()?;
+        register_winre_after_relocate(plan.disk.disk_index, win_part)?;
     } else {
         info!("recovery already at end - skipping relocation");
     }
