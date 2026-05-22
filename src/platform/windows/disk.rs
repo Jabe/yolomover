@@ -103,8 +103,8 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_NO_BUFFERING, FILE_GENERIC_READ,
+        FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -113,11 +113,13 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
     } else {
         FILE_GENERIC_READ
     };
-    let share = if write {
-        // Exclusive access while relocating partitions.
-        windows::Win32::Storage::FileSystem::FILE_SHARE_MODE(0)
+    // The boot disk always has open handles (volumes, system). Exclusive open fails with
+    // ERROR_SHARING_VIOLATION (0x80070020). Volume locking is handled separately.
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    let flags = if write {
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING
     } else {
-        FILE_SHARE_READ | FILE_SHARE_WRITE
+        FILE_ATTRIBUTE_NORMAL
     };
 
     unsafe {
@@ -127,13 +129,10 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
             share,
             None,
             OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
+            flags,
             HANDLE::default(),
         )
-        .map_err(|e| YoloError::Io {
-            path: path.to_string(),
-            source: std::io::Error::from_raw_os_error(e.code().0),
-        })?;
+        .map_err(|e| win32_create_err(path, e.code().0 as u32))?;
         Ok(File::from_raw_handle(handle.0 as _))
     }
 }
@@ -142,6 +141,32 @@ fn io_err(path: &str, e: std::io::Error) -> YoloError {
     YoloError::Io {
         path: path.to_string(),
         source: e,
+    }
+}
+
+fn win32_create_err(path: &str, code: u32) -> YoloError {
+    let hint = sharing_violation_hint(code);
+    YoloError::WindowsApi {
+        detail: format!("CreateFileW({path:?}): {hint} (0x{code:08X})"),
+    }
+}
+
+fn sharing_violation_hint(code: u32) -> &'static str {
+    let code = win32_error_code(code);
+    match code {
+        0x20 => "ERROR_SHARING_VIOLATION — disk or volume is in use; close other disk tools",
+        0x05 => "ERROR_ACCESS_DENIED — run as Administrator",
+        0x02 => "ERROR_FILE_NOT_FOUND — check device path",
+        _ => "CreateFileW failed",
+    }
+}
+
+/// Map `HRESULT` (`0x80070020`) or raw Win32 (`0x20`) to the low code.
+fn win32_error_code(code: u32) -> u32 {
+    if (code & 0xFFFF_0000) == 0x8007_0000 {
+        code & 0xFFFF
+    } else {
+        code
     }
 }
 
@@ -162,8 +187,7 @@ fn system_volume_device_path() -> String {
 pub fn system_disk_index() -> Result<u32> {
     use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ,
-        OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows::Win32::System::Ioctl::{
         IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
@@ -174,18 +198,17 @@ pub fn system_disk_index() -> Result<u32> {
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
+        // Access 0 + shared open: IOCTL-only per MSDN for STORAGE_DEVICE_NUMBER.
         let handle = CreateFileW(
             windows::core::PCWSTR(wide.as_ptr()),
-            FILE_GENERIC_READ.0,
-            FILE_SHARE_READ,
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL,
             HANDLE::default(),
         )
-        .map_err(|e| YoloError::WindowsApi {
-            detail: format!("CreateFileW({path:?}): {e}"),
-        })?;
+        .map_err(|e| win32_create_err(&path, e.code().0 as u32))?;
         if handle == INVALID_HANDLE_VALUE {
             return Err(YoloError::WindowsApi {
                 detail: format!("invalid handle for {path:?}"),
