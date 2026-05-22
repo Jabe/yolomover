@@ -90,6 +90,12 @@ pub fn print_plan(plan: &RelocationPlan) {
         "  Target LBA:   {} .. {}",
         plan.target_first_lba, plan.target_last_lba
     );
+    let slack = crate::plan::slack_after_recovery(&plan.disk, &plan.recovery);
+    println!(
+        "  Unallocated after recovery: {} sectors ({:.1} MiB)",
+        slack,
+        slack as f64 * 512.0 / (1024.0 * 1024.0)
+    );
     if plan.already_at_end {
         println!("  Status:       nothing to do - recovery already at disk tail");
         if plan.current_first_lba != plan.target_first_lba {
@@ -106,7 +112,7 @@ pub fn print_plan(plan: &RelocationPlan) {
         );
         if freed > 0 {
             println!(
-                "  Freed before old recovery (approx): {} sectors ({:.1} MiB)",
+                "  Extend C: into (approx): {} sectors ({:.1} MiB)",
                 freed,
                 freed as f64 * 512.0 / (1024.0 * 1024.0)
             );
@@ -115,8 +121,19 @@ pub fn print_plan(plan: &RelocationPlan) {
 }
 
 fn estimate_freed_sectors(plan: &RelocationPlan) -> u64 {
-    // Rough: space between end of partition before recovery and recovery start.
     let recovery = &plan.recovery;
+
+    // [C:][Recovery][unallocated...] — extending C: uses the recovery extent once it moves.
+    if plan
+        .disk
+        .boot_partition
+        .as_ref()
+        .is_some_and(|b| b.last_lba + 1 == recovery.first_lba)
+    {
+        return recovery.sector_count();
+    }
+
+    // [C:][gap][Recovery] — gap between prior partition and recovery.
     let mut prev_end = plan.disk.header_first_usable;
     for p in &plan.disk.partitions {
         if p.is_unused() || p.index == recovery.index {

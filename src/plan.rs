@@ -67,6 +67,13 @@ pub fn build_relocation_plan(layout: &DiskLayout) -> Result<RelocationPlan> {
     })
 }
 
+/// Unallocated sectors between recovery end and last usable LBA (backup GPT aside).
+pub fn slack_after_recovery(layout: &DiskLayout, recovery: &crate::gpt::GptPartitionEntry) -> u64 {
+    layout
+        .header_last_usable
+        .saturating_sub(recovery.last_lba)
+}
+
 /// True when relocating would not help extend C: (or is only a tiny alignment nudge at disk tail).
 fn no_relocation_needed(
     layout: &DiskLayout,
@@ -78,6 +85,11 @@ fn no_relocation_needed(
         return true;
     }
 
+    // Primary use case: [C:][Recovery][large unallocated] -> move recovery to end, extend C:.
+    if slack_after_recovery(layout, recovery) > ALIGN_SECTORS * 2 {
+        return false;
+    }
+
     let start_shift = target_first.saturating_sub(recovery.first_lba);
     let end_shift = target_last.saturating_sub(recovery.last_lba);
     let alignment_only =
@@ -87,18 +99,13 @@ fn no_relocation_needed(
         return false;
     }
 
-    // Recovery immediately after C: — sliding it toward the tail does not free space before C:.
+    // Tiny alignment nudge only when recovery already sits at the disk tail.
     let adjacent_to_boot = layout
         .boot_partition
         .as_ref()
         .is_some_and(|b| b.last_lba + 1 == recovery.first_lba);
 
-    let at_disk_tail = layout
-        .header_last_usable
-        .saturating_sub(recovery.last_lba)
-        <= ALIGN_SECTORS * 2;
-
-    adjacent_to_boot && at_disk_tail
+    adjacent_to_boot && slack_after_recovery(layout, recovery) <= ALIGN_SECTORS * 2
 }
 
 fn validate_target(
@@ -167,6 +174,49 @@ mod tests {
             recovery: Some(recovery),
             boot_partition: None,
         }
+    }
+
+    #[test]
+    fn slack_after_recovery_triggers_move() {
+        let boot_last = 100_000u64;
+        let recovery_first = 100_001u64;
+        let recovery_sectors = 10_000u64;
+        let recovery_last = recovery_first + recovery_sectors - 1;
+        let slack = 12_000_000u64; // ~6 GiB
+        let last_usable = recovery_last + slack;
+        let boot = GptPartitionEntry {
+            index: 2,
+            type_guid: GptGuid::parse_str(crate::gpt::MS_BASIC_DATA_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+            first_lba: 1000,
+            last_lba: boot_last,
+            attributes: 0,
+            name: "OS".into(),
+        };
+        let recovery = GptPartitionEntry {
+            index: 3,
+            type_guid: GptGuid::parse_str(RECOVERY_TYPE_GUID).unwrap(),
+            unique_guid: GptGuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            first_lba: recovery_first,
+            last_lba: recovery_last,
+            attributes: 0,
+            name: "Recovery".into(),
+        };
+        let layout = DiskLayout {
+            disk_index: 0,
+            disk_path: "\\\\.\\PhysicalDrive0".into(),
+            is_gpt: true,
+            disk_size_bytes: (last_usable + 64) * 512,
+            sector_size: 512,
+            header_first_usable: 34,
+            header_last_usable: last_usable,
+            partitions: vec![boot.clone(), recovery.clone()],
+            recovery: Some(recovery),
+            boot_partition: Some(boot),
+        };
+        let plan = build_relocation_plan(&layout).unwrap();
+        assert!(!plan.already_at_end);
+        assert!(plan.needs_move());
     }
 
     #[test]
