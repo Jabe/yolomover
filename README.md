@@ -17,7 +17,7 @@ Build on any host; **run only on Windows**.
 ## Quick start
 
 ```powershell
-# Inspect layout + WinRE (safe, read-only)
+# Inspect layout, recovery files, WinRE (safe, read-only)
 yolomover inspect
 
 # Show planned moves without writing
@@ -32,12 +32,24 @@ yolomover extend --yes
 
 ## What it does
 
-1. **Detect** physical system disk, GPT layout, recovery partition, and `reagentc /info` status.
+1. **Detect** physical system disk, GPT layout, recovery partition, and raw `reagentc /info` (informational).
 2. **Validate** preconditions (GPT, recovery GUID, alignment, free space at end).
 3. **`relocate`** — disable WinRE, move recovery data to the tail, update GPT, re-enable WinRE.
 4. **`extend`** — grow the system boot volume (`%SystemDrive%`) into contiguous unallocated space via diskpart.
 
 Relocation and extend are **separate commands** on purpose: confirm recovery/WinRE before growing the OS volume.
+
+## Verification (no output parsing)
+
+Success is checked on disk, not by parsing `reagentc` or diskpart messages:
+
+| Step | Check |
+|------|--------|
+| **`inspect` / `plan`** | Lists `winre.wim` / `boot.sdi` on the recovery partition (`Recovery partition files`). |
+| **`relocate`** | After re-enable, `winre.wim` on the recovery partition must exist (≥ 1 MiB). `reagentc /info` is printed but not used for pass/fail. |
+| **`extend`** | Re-reads GPT; boot partition sector count must increase. Prints before/after size summary. |
+
+`reagentc /enable` can take **a few minutes**; the tool prints a hint before it runs.
 
 ## Safety model
 
