@@ -1,9 +1,8 @@
-//! Extend the system boot volume into adjacent unallocated space (GPT + NTFS).
+//! Extend the system boot volume into adjacent unallocated space.
 
 use crate::error::{Result, YoloError};
 use crate::gpt::SECTOR_SIZE;
 use crate::platform::windows::disk::{system_volume_device_path, PhysicalDisk};
-use crate::platform::windows::gpt_disk::GptOnDisk;
 use crate::platform::windows::layout::read_disk_layout;
 use crate::types::{DiskLayout, ExtendSummary};
 use tracing::info;
@@ -51,19 +50,21 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let extend_bytes = extendable
         .checked_mul(SECTOR_SIZE)
         .ok_or_else(|| YoloError::other("extend size overflow"))?;
+    let win_part = layout.windows_partition_number(boot);
 
     info!(
         drive = %letter,
         gpt_index = boot.index,
+        windows_partition = win_part,
         before_sectors,
         extendable_mib = extendable * SECTOR_SIZE / (1024 * 1024),
-        "extending boot volume via GPT + FSCTL_EXTEND_VOLUME"
+        "extending boot volume via IOCTL_DISK_GROW_PARTITION + FSCTL_EXTEND_VOLUME"
     );
 
-    let mut disk = PhysicalDisk::open(layout.disk_index)?;
-    let mut gpt = GptOnDisk::load(&mut disk)?;
-    gpt.grow_partition_end(boot.index, extendable)?;
-    gpt.commit(&mut disk)?;
+    // Use the storage driver to grow the live boot partition. Raw GPT edits on C: while
+    // mounted can crash the system; recovery relocate targets a separate partition instead.
+    let disk = PhysicalDisk::open(layout.disk_index)?;
+    disk.grow_partition(win_part, extend_bytes)?;
     disk.update_properties()?;
     extend_ntfs_volume(extend_bytes)?;
 

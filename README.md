@@ -45,7 +45,7 @@ Relocation and extend are **separate commands** on purpose: confirm recovery/Win
 |------|--------|
 | **`inspect` / `plan`** | `winre.wim` and `boot.sdi` on the recovery partition |
 | **`relocate`** | `winre.wim` on the recovery partition after re-enable (≥ 1 MiB) |
-| **`extend`** | Boot partition grows in GPT; before/after size summary |
+| **`extend`** | Boot partition grows in GPT; NTFS extended; before/after size summary |
 
 `reagentc /enable` can take **a few minutes**; the tool prints a hint before it runs.
 
@@ -58,7 +58,7 @@ Relocation and extend are **separate commands** on purpose: confirm recovery/Win
 
 ### Known limitations
 
-- Boot volume extend requires **NTFS** on `%SystemDrive%` (online extend via `FSCTL_EXTEND_VOLUME`).
+- Boot volume extend uses `IOCTL_DISK_GROW_PARTITION` + `FSCTL_EXTEND_VOLUME` on `%SystemDrive%` (NTFS).
 - Buffered overlap copies are capped at 2 GiB (typical recovery partitions are smaller).
 - Must be tested on real hardware/VMs before production use.
 

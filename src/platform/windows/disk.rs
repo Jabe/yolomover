@@ -114,6 +114,44 @@ impl PhysicalDisk {
         }
         Ok(())
     }
+
+    /// Grow a partition through the storage driver (safe for live system volumes).
+    pub fn grow_partition(&self, partition_number: u32, bytes_to_grow: u64) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Ioctl::{DISK_GROW_PARTITION, IOCTL_DISK_GROW_PARTITION};
+        use windows::Win32::System::IO::DeviceIoControl;
+
+        let bytes: i64 = bytes_to_grow.try_into().map_err(|_| {
+            YoloError::other(format!("grow size {bytes_to_grow} bytes exceeds i64::MAX"))
+        })?;
+        let input = DISK_GROW_PARTITION {
+            PartitionNumber: partition_number,
+            BytesToGrow: bytes,
+        };
+
+        let handle = HANDLE(self.file.as_raw_handle() as _);
+        unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_DISK_GROW_PARTITION,
+                Some(&input as *const _ as *const _),
+                std::mem::size_of::<DISK_GROW_PARTITION>() as u32,
+                None,
+                0,
+                None,
+                None,
+            )
+            .map_err(|e| YoloError::WindowsApi {
+                detail: format!(
+                    "IOCTL_DISK_GROW_PARTITION partition {partition_number} (+{bytes_to_grow} bytes) on {}: {}",
+                    self.path,
+                    e.code().0
+                ),
+            })?;
+        }
+        Ok(())
+    }
 }
 
 fn probe_size(file: &File, path: &str) -> Result<u64> {

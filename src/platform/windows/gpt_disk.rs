@@ -54,49 +54,11 @@ impl GptOnDisk {
         new_first: u64,
         new_last: u64,
     ) -> Result<()> {
-        Self::set_partition_lbas(
-            &mut self.entries,
-            recovery_index,
-            new_first,
-            new_last,
-        )
-    }
-
-    /// Grow a partition by extending its ending LBA (used for boot volume extend).
-    pub fn grow_partition_end(
-        &mut self,
-        partition_index: u32,
-        extra_sectors: u64,
-    ) -> Result<u64> {
         let entry = self
             .entries
             .iter_mut()
-            .find(|e| e.index == partition_index)
-            .ok_or_else(|| YoloError::other(format!("partition {partition_index} missing")))?;
-        if entry.is_unused() {
-            return Err(YoloError::other(format!(
-                "partition {partition_index} is unused"
-            )));
-        }
-        let new_last = entry.last_lba.checked_add(extra_sectors).ok_or_else(|| {
-            YoloError::other(format!(
-                "partition {partition_index} last LBA overflow extending by {extra_sectors} sectors"
-            ))
-        })?;
-        entry.last_lba = new_last;
-        Ok(new_last)
-    }
-
-    fn set_partition_lbas(
-        entries: &mut [GptPartitionEntry],
-        partition_index: u32,
-        new_first: u64,
-        new_last: u64,
-    ) -> Result<()> {
-        let entry = entries
-            .iter_mut()
-            .find(|e| e.index == partition_index)
-            .ok_or_else(|| YoloError::other(format!("partition {partition_index} missing")))?;
+            .find(|e| e.index == recovery_index)
+            .ok_or_else(|| YoloError::other(format!("partition {recovery_index} missing")))?;
         entry.first_lba = new_first;
         entry.last_lba = new_last;
         Ok(())
