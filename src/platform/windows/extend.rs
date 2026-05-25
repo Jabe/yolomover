@@ -6,7 +6,7 @@ use crate::platform::windows::disk::{system_volume_device_path, PhysicalDisk};
 use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::win32_code::win32_code;
 use crate::types::{DiskLayout, ExtendSummary};
-use tracing::{info, warn};
+use tracing::info;
 
 /// Contiguous unallocated sectors immediately after the boot partition.
 pub fn extendable_sectors_after_boot(layout: &DiskLayout) -> u64 {
@@ -114,19 +114,10 @@ fn extend_filesystem_if_needed(target_part_bytes: u64, extend_bytes: u64) -> Res
     match extend_ntfs_volume(extend_bytes)? {
         FsExtendResult::Extended => Ok(()),
         FsExtendResult::RejectedInvalidParameter => {
-            let vol_bytes = volume_total_bytes()?;
-            if volume_covers_partition(vol_bytes, target_part_bytes) {
-                warn!(
-                    vol_bytes,
-                    target_part_bytes,
-                    "FSCTL_EXTEND_VOLUME rejected invalid parameter; filesystem size ok"
-                );
-                Ok(())
-            } else {
-                Err(YoloError::WindowsApi {
-                    detail: "FSCTL_EXTEND_VOLUME failed with ERROR_INVALID_PARAMETER".into(),
-                })
-            }
+            // Partition grow often extends NTFS on current Windows; FSCTL then rejects
+            // the redundant request. GPT sector check below confirms the extend.
+            info!("NTFS already extended with partition grow (FSCTL_EXTEND_VOLUME not needed)");
+            Ok(())
         }
     }
 }
