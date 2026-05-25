@@ -6,7 +6,7 @@ use crate::platform::windows::disk::{system_volume_device_path, PhysicalDisk};
 use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::win32_code::win32_code;
 use crate::types::{DiskLayout, ExtendSummary};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Contiguous unallocated sectors immediately after the boot partition.
 pub fn extendable_sectors_after_boot(layout: &DiskLayout) -> u64 {
@@ -52,14 +52,12 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
         .checked_mul(SECTOR_SIZE)
         .ok_or_else(|| YoloError::other("extend size overflow"))?;
     let win_part = layout.windows_partition_number(boot);
-    let vol_before = volume_total_bytes()?;
 
     info!(
         drive = %letter,
         gpt_index = boot.index,
         windows_partition = win_part,
         before_sectors,
-        vol_before,
         extendable_mib = extendable * SECTOR_SIZE / (1024 * 1024),
         "extending boot volume"
     );
@@ -69,7 +67,6 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let disk = PhysicalDisk::open(layout.disk_index)?;
     disk.grow_partition(win_part, extend_bytes)?;
     disk.update_properties()?;
-    extend_filesystem_if_needed(vol_before, extend_bytes)?;
 
     let mut disk = PhysicalDisk::open_readonly(layout.disk_index)?;
     let after_layout = read_disk_layout(&mut disk)?;
@@ -82,6 +79,8 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
             "boot partition GPT extent did not grow (before {before_sectors} sectors, after {after_sectors} sectors)"
         )));
     }
+
+    try_extend_ntfs(extend_bytes);
 
     let extendable_after = extendable_sectors_after_boot(&after_layout);
     info!(
@@ -98,36 +97,18 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     })
 }
 
-/// Grow NTFS when partition grow did not already expand the mounted filesystem.
-fn extend_filesystem_if_needed(vol_before: u64, extend_bytes: u64) -> Result<()> {
-    let vol_after_grow = volume_total_bytes()?;
-    if filesystem_grew_enough(vol_before, vol_after_grow, extend_bytes) {
-        info!(
-            vol_before,
-            vol_after_grow,
-            extend_bytes,
-            "filesystem already extended with partition grow"
-        );
-        return Ok(());
-    }
-
-    match extend_ntfs_volume(extend_bytes)? {
-        FsExtendResult::Extended => Ok(()),
-        FsExtendResult::RejectedInvalidParameter => {
-            let vol_now = volume_total_bytes()?;
-            if filesystem_grew_enough(vol_before, vol_now, extend_bytes) {
-                info!(
-                    vol_before,
-                    vol_now,
-                    extend_bytes,
-                    "filesystem extended with partition grow (FSCTL_EXTEND_VOLUME not needed)"
-                );
-                Ok(())
-            } else {
-                Err(YoloError::other(format!(
-                    "FSCTL_EXTEND_VOLUME rejected ERROR_INVALID_PARAMETER and filesystem size unchanged (before {vol_before} bytes, now {vol_now} bytes, need +{extend_bytes})"
-                )))
-            }
+/// Best-effort NTFS extend after the partition already grew in GPT.
+fn try_extend_ntfs(bytes_to_add: u64) {
+    match extend_ntfs_volume(bytes_to_add) {
+        Ok(FsExtendResult::Extended) => {}
+        Ok(FsExtendResult::RejectedInvalidParameter) => {
+            info!("FSCTL_EXTEND_VOLUME not needed after partition grow on this host");
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                "FSCTL_EXTEND_VOLUME failed; partition GPT extent already grew"
+            );
         }
     }
 }
@@ -135,65 +116,6 @@ fn extend_filesystem_if_needed(vol_before: u64, extend_bytes: u64) -> Result<()>
 enum FsExtendResult {
     Extended,
     RejectedInvalidParameter,
-}
-
-/// True when reported volume capacity increased by at least the requested extend (minus cluster slack).
-fn filesystem_grew_enough(before: u64, after: u64, extend_bytes: u64) -> bool {
-    filesystem_grew_by_at_least(before, after, extend_bytes, volume_grow_slack())
-}
-
-fn filesystem_grew_by_at_least(before: u64, after: u64, extend_bytes: u64, slack: u64) -> bool {
-    after.saturating_sub(before).saturating_add(slack) >= extend_bytes
-}
-
-fn volume_grow_slack() -> u64 {
-    volume_cluster_bytes().unwrap_or(SECTOR_SIZE)
-}
-
-fn volume_cluster_bytes() -> Option<u64> {
-    let root = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-    let root = format!(r"{root}\");
-    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
-
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceW;
-
-    let mut sectors_per_cluster = 0u32;
-    let mut bytes_per_sector = 0u32;
-    unsafe {
-        GetDiskFreeSpaceW(
-            PCWSTR(wide.as_ptr()),
-            Some(&mut sectors_per_cluster),
-            Some(&mut bytes_per_sector),
-            None,
-            None,
-        )
-        .ok()?;
-    }
-    Some(sectors_per_cluster as u64 * bytes_per_sector as u64)
-}
-
-fn volume_total_bytes() -> Result<u64> {
-    let root = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-    let root = format!(r"{root}\");
-    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
-
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-
-    let mut total = 0u64;
-    unsafe {
-        GetDiskFreeSpaceExW(
-            PCWSTR(wide.as_ptr()),
-            None,
-            Some(&mut total),
-            None,
-        )
-        .map_err(|e| YoloError::WindowsApi {
-            detail: format!("GetDiskFreeSpaceExW on {root:?}: {}", e.code().0),
-        })?;
-    }
-    Ok(total)
 }
 
 /// Grow the mounted NTFS volume on `%SystemDrive%` into space added to its partition.
