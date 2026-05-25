@@ -1,5 +1,6 @@
 use crate::error::{Result, YoloError};
 use crate::gpt::SECTOR_SIZE;
+use crate::platform::windows::win32_code::win32_code;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::windows::io::FromRawHandle;
@@ -258,22 +259,12 @@ fn win32_create_err(path: &str, code: u32) -> YoloError {
 }
 
 fn sharing_violation_hint(code: u32) -> &'static str {
-    let code = win32_error_code(code);
-    match code {
+    match win32_code(code as i32) {
         0x20 => "ERROR_SHARING_VIOLATION - disk or volume is in use; close other disk tools",
         0x05 => "ERROR_ACCESS_DENIED - run as Administrator",
         0x02 => "ERROR_FILE_NOT_FOUND - check device path",
         0x57 => "ERROR_INVALID_PARAMETER - check device path and open flags",
         _ => "CreateFileW failed",
-    }
-}
-
-/// Map `HRESULT` (`0x80070020`) or raw Win32 (`0x20`) to the low code.
-fn win32_error_code(code: u32) -> u32 {
-    if (code & 0xFFFF_0000) == 0x8007_0000 {
-        code & 0xFFFF
-    } else {
-        code
     }
 }
 

@@ -4,6 +4,7 @@ use crate::error::{Result, YoloError};
 use crate::gpt::SECTOR_SIZE;
 use crate::platform::windows::disk::{system_volume_device_path, PhysicalDisk};
 use crate::platform::windows::layout::read_disk_layout;
+use crate::platform::windows::win32_code::win32_code;
 use crate::types::{DiskLayout, ExtendSummary};
 use tracing::{info, warn};
 
@@ -69,7 +70,7 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let disk = PhysicalDisk::open(layout.disk_index)?;
     disk.grow_partition(win_part, extend_bytes)?;
     disk.update_properties()?;
-    extend_filesystem_if_needed(target_part_bytes)?;
+    extend_filesystem_if_needed(target_part_bytes, extend_bytes)?;
 
     let mut disk = PhysicalDisk::open_readonly(layout.disk_index)?;
     let after_layout = read_disk_layout(&mut disk)?;
@@ -99,7 +100,7 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
 }
 
 /// Grow NTFS when the partition grow did not already expand the mounted filesystem.
-fn extend_filesystem_if_needed(target_part_bytes: u64) -> Result<()> {
+fn extend_filesystem_if_needed(target_part_bytes: u64, extend_bytes: u64) -> Result<()> {
     let vol_bytes = volume_total_bytes()?;
     if volume_covers_partition(vol_bytes, target_part_bytes) {
         info!(
@@ -110,24 +111,29 @@ fn extend_filesystem_if_needed(target_part_bytes: u64) -> Result<()> {
         return Ok(());
     }
 
-    let need = target_part_bytes.saturating_sub(vol_bytes);
-    match extend_ntfs_volume(need) {
-        Ok(()) => Ok(()),
-        Err(YoloError::WindowsApi { detail }) if detail.contains("0x80070057") => {
+    match extend_ntfs_volume(extend_bytes)? {
+        FsExtendResult::Extended => Ok(()),
+        FsExtendResult::RejectedInvalidParameter => {
             let vol_bytes = volume_total_bytes()?;
             if volume_covers_partition(vol_bytes, target_part_bytes) {
                 warn!(
                     vol_bytes,
                     target_part_bytes,
-                    "FSCTL_EXTEND_VOLUME returned ERROR_INVALID_PARAMETER; filesystem size ok"
+                    "FSCTL_EXTEND_VOLUME rejected invalid parameter; filesystem size ok"
                 );
                 Ok(())
             } else {
-                Err(YoloError::WindowsApi { detail })
+                Err(YoloError::WindowsApi {
+                    detail: "FSCTL_EXTEND_VOLUME failed with ERROR_INVALID_PARAMETER".into(),
+                })
             }
         }
-        Err(e) => Err(e),
     }
+}
+
+enum FsExtendResult {
+    Extended,
+    RejectedInvalidParameter,
 }
 
 fn volume_covers_partition(volume_bytes: u64, partition_bytes: u64) -> bool {
@@ -159,9 +165,9 @@ fn volume_total_bytes() -> Result<u64> {
 }
 
 /// Grow the mounted NTFS volume on `%SystemDrive%` into space added to its partition.
-fn extend_ntfs_volume(bytes_to_add: u64) -> Result<()> {
+fn extend_ntfs_volume(bytes_to_add: u64) -> Result<FsExtendResult> {
     if bytes_to_add == 0 {
-        return Ok(());
+        return Ok(FsExtendResult::Extended);
     }
 
     let path = system_volume_device_path();
@@ -170,7 +176,9 @@ fn extend_ntfs_volume(bytes_to_add: u64) -> Result<()> {
     })?;
 
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, HANDLE, INVALID_HANDLE_VALUE,
+    };
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
         FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -209,16 +217,23 @@ fn extend_ntfs_volume(bytes_to_add: u64) -> Result<()> {
             None,
         );
         let _ = CloseHandle(handle);
-        result.map_err(|e| YoloError::WindowsApi {
-            detail: format!(
-                "FSCTL_EXTEND_VOLUME on {path:?} (+{bytes_to_add} bytes): {}",
-                e.code().0
-            ),
-        })?;
-    }
 
-    info!(bytes_to_add, "NTFS volume extended via FSCTL_EXTEND_VOLUME");
-    Ok(())
+        match result {
+            Ok(()) => {
+                info!(bytes_to_add, "NTFS volume extended via FSCTL_EXTEND_VOLUME");
+                Ok(FsExtendResult::Extended)
+            }
+            Err(e) if win32_code(e.code().0) == ERROR_INVALID_PARAMETER.0 => {
+                Ok(FsExtendResult::RejectedInvalidParameter)
+            }
+            Err(e) => Err(YoloError::WindowsApi {
+                detail: format!(
+                    "FSCTL_EXTEND_VOLUME on {path:?} (+{bytes_to_add} bytes): {}",
+                    e.code().0
+                ),
+            }),
+        }
+    }
 }
 
 fn system_drive_letter() -> String {

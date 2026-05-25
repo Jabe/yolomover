@@ -1,6 +1,7 @@
 mod disk;
 mod diskpart_cmd;
 mod extend;
+mod win32_code;
 mod winre_inspect;
 mod gpt_disk;
 mod layout;
