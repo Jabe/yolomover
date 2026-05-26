@@ -63,23 +63,19 @@ fn system_recovery_store() -> PathBuf {
 }
 
 /// Re-register WinRE after relocating the recovery partition.
-///
-/// `/disable` moves `winre.wim` to `%SystemRoot%\System32\Recovery`, so the copied
-/// recovery partition often has no image until `/enable` redeploys it.
 pub fn register_winre_after_relocate(disk_index: u32, partition_number: u32) -> Result<()> {
     let _ = run_diskpart("rescan\nexit\n");
 
-    if enable_winre().is_ok() {
-        info!("reagentc /enable succeeded");
+    if set_reimage_path(disk_index, partition_number).is_ok() && enable_winre().is_ok() {
+        info!("WinRE registered on relocated recovery partition");
         return Ok(());
     }
 
-    warn!("reagentc /enable alone failed; copying WinRE image from System32\\Recovery");
-
+    info!("copying WinRE image from System32\\Recovery and retrying setreimage");
     copy_winre_store_to_recovery(disk_index, partition_number)?;
 
     if set_reimage_path(disk_index, partition_number).is_ok() && enable_winre().is_ok() {
-        info!("WinRE registered via setreimage after copying image");
+        info!("WinRE registered on relocated recovery partition");
         return Ok(());
     }
 
