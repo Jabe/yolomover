@@ -1,6 +1,6 @@
 use crate::error::{Result, YoloError};
 use crate::gpt::{
-    align_down, copy_strategy, end_aligned_start, LbaRange, CopyStrategy, ALIGN_SECTORS,
+    align_down, copy_strategy, end_aligned_start, CopyStrategy, LbaRange, ALIGN_SECTORS,
     MAX_BUFFERED_COPY_BYTES, SECTOR_SIZE,
 };
 use crate::types::{DiskLayout, RelocationPlan};
@@ -20,19 +20,10 @@ pub fn build_relocation_plan(layout: &DiskLayout) -> Result<RelocationPlan> {
     let current_first_lba = recovery.first_lba;
     let current_last_lba = recovery.last_lba;
     let sector_count = recovery.sector_count();
-    let target_first = end_aligned_start(
-        layout.header_last_usable,
-        sector_count,
-        ALIGN_SECTORS,
-    );
+    let target_first = end_aligned_start(layout.header_last_usable, sector_count, ALIGN_SECTORS);
     let target_last = target_first + sector_count - 1;
 
-    let already_at_end = no_relocation_needed(
-        layout,
-        &recovery,
-        target_first,
-        target_last,
-    );
+    let already_at_end = no_relocation_needed(layout, &recovery, target_first, target_last);
 
     let src = LbaRange::new(current_first_lba, current_last_lba);
     let dst = LbaRange::new(target_first, target_last);
@@ -69,9 +60,7 @@ pub fn build_relocation_plan(layout: &DiskLayout) -> Result<RelocationPlan> {
 
 /// Unallocated sectors between recovery end and last usable LBA (backup GPT aside).
 pub fn slack_after_recovery(layout: &DiskLayout, recovery: &crate::gpt::GptPartitionEntry) -> u64 {
-    layout
-        .header_last_usable
-        .saturating_sub(recovery.last_lba)
+    layout.header_last_usable.saturating_sub(recovery.last_lba)
 }
 
 /// True when relocating would not help extend C: (or is only a tiny alignment nudge at disk tail).
@@ -327,9 +316,6 @@ mod tests {
         assert!(plan.needs_move());
         assert!(plan.target_last_lba <= last);
         assert_eq!(plan.target_first_lba % crate::gpt::ALIGN_SECTORS, 0);
-        assert_eq!(
-            plan.target_last_lba - plan.target_first_lba + 1,
-            sectors
-        );
+        assert_eq!(plan.target_last_lba - plan.target_first_lba + 1, sectors);
     }
 }

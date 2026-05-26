@@ -1,6 +1,7 @@
 //! Lock volumes that overlap a partition range on a physical disk.
 
 use crate::error::{Result, YoloError};
+use crate::gpt::SECTOR_SIZE;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use tracing::{debug, warn};
 use windows::core::PCWSTR;
@@ -11,8 +12,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::{
-    DISK_EXTENT, FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
-    VOLUME_DISK_EXTENTS,
+    DISK_EXTENT, FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, VOLUME_DISK_EXTENTS,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -91,7 +91,11 @@ fn try_lock_volume(
 }
 
 fn open_volume(volume_name: &[u16]) -> Result<OwnedHandle> {
-    let wide: Vec<u16> = volume_name.iter().copied().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = volume_name
+        .iter()
+        .copied()
+        .chain(std::iter::once(0))
+        .collect();
     unsafe {
         let raw = CreateFileW(
             PCWSTR(wide.as_ptr()),
@@ -152,7 +156,7 @@ fn sector_lba(byte_offset: i64) -> u64 {
     if byte_offset <= 0 {
         return 0;
     }
-    (byte_offset as u64) / 512
+    (byte_offset as u64) / SECTOR_SIZE
 }
 
 fn lock_and_dismount(handle: std::os::windows::io::RawHandle, volume_name: &[u16]) -> Result<()> {

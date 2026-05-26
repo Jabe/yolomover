@@ -15,10 +15,7 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
 
     if header.partition_entry_size as usize != PARTITION_ENTRY_SIZE {
         return Err(YoloError::GptInvalid {
-            detail: format!(
-                "unexpected entry size {}",
-                header.partition_entry_size
-            ),
+            detail: format!("unexpected entry size {}", header.partition_entry_size),
         });
     }
 
@@ -32,7 +29,8 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
 
     for i in 0..PARTITION_COUNT.min(header.partition_count as usize) {
         let off = i * PARTITION_ENTRY_SIZE;
-        let entry = GptPartitionEntry::parse(i as u32, &raw_entries[off..off + PARTITION_ENTRY_SIZE])?;
+        let entry =
+            GptPartitionEntry::parse(i as u32, &raw_entries[off..off + PARTITION_ENTRY_SIZE])?;
         if entry.is_unused() {
             continue;
         }
@@ -144,10 +142,7 @@ fn pick_boot_partition(
     // Fallback: partition immediately after ESP
     if let Some(esp) = esp_list.first() {
         let esp_end = esp.last_lba;
-        return partitions
-            .iter()
-            .find(|p| p.first_lba > esp_end)
-            .cloned();
+        return partitions.iter().find(|p| p.first_lba > esp_end).cloned();
     }
     None
 }

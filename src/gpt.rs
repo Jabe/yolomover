@@ -60,8 +60,8 @@ impl GptGuid {
         let b = u.as_bytes();
         Self {
             bytes: [
-                b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11],
-                b[12], b[13], b[14], b[15],
+                b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12],
+                b[13], b[14], b[15],
             ],
         }
     }
@@ -73,14 +73,15 @@ impl GptGuid {
     pub fn to_uuid(self) -> Uuid {
         let b = self.bytes;
         Uuid::from_bytes([
-            b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12],
-            b[13], b[14], b[15],
+            b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13],
+            b[14], b[15],
         ])
     }
 
     pub fn parse_str(s: &str) -> Result<Self> {
-        let u = Uuid::parse_str(s)
-            .map_err(|e| YoloError::GptInvalid { detail: e.to_string() })?;
+        let u = Uuid::parse_str(s).map_err(|e| YoloError::GptInvalid {
+            detail: e.to_string(),
+        })?;
         Ok(Self::from_uuid(u))
     }
 
@@ -147,7 +148,11 @@ impl GptHeader {
             partition_entry_lba: u64::from_le_bytes(bytes_at(bytes, 72, "partition_entry_lba")?),
             partition_count: u32::from_le_bytes(bytes_at(bytes, 80, "partition_count")?),
             partition_entry_size: u32::from_le_bytes(bytes_at(bytes, 84, "partition_entry_size")?),
-            partition_array_crc32: u32::from_le_bytes(bytes_at(bytes, 88, "partition_array_crc32")?),
+            partition_array_crc32: u32::from_le_bytes(bytes_at(
+                bytes,
+                88,
+                "partition_array_crc32",
+            )?),
         })
     }
 
@@ -297,11 +302,7 @@ pub fn align_up(value: u64, align: u64) -> u64 {
 }
 
 /// Compute the last aligned starting LBA for a partition of `sector_count` sectors.
-pub fn end_aligned_start(
-    last_usable_lba: u64,
-    sector_count: u64,
-    align_sectors: u64,
-) -> u64 {
+pub fn end_aligned_start(last_usable_lba: u64, sector_count: u64, align_sectors: u64) -> u64 {
     let end = last_usable_lba;
     let start = end.saturating_sub(sector_count - 1);
     align_down(start, align_sectors)

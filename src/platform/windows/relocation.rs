@@ -118,12 +118,7 @@ fn copy_buffered(
     Ok(())
 }
 
-fn copy_one_chunk(
-    disk: &mut PhysicalDisk,
-    src: u64,
-    dst: u64,
-    sectors: u64,
-) -> Result<()> {
+fn copy_one_chunk(disk: &mut PhysicalDisk, src: u64, dst: u64, sectors: u64) -> Result<()> {
     let bytes = (sectors * SECTOR_SIZE) as usize;
     let mut buf = vec![0u8; bytes];
     disk.read_sectors(src, sectors, &mut buf)?;
@@ -145,10 +140,14 @@ pub fn preflight(disk: &mut PhysicalDisk, plan: &RelocationPlan) -> Result<()> {
             disk_index: layout.disk_index,
         })?;
     if recovery.index != plan.recovery.index {
-        return Err(YoloError::other("recovery partition index changed since plan"));
+        return Err(YoloError::other(
+            "recovery partition index changed since plan",
+        ));
     }
     if recovery.first_lba != plan.current_first_lba || recovery.last_lba != plan.current_last_lba {
-        return Err(YoloError::other("recovery partition LBAs changed since plan"));
+        return Err(YoloError::other(
+            "recovery partition LBAs changed since plan",
+        ));
     }
     Ok(())
 }

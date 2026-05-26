@@ -1,13 +1,13 @@
 mod disk;
 mod diskpart_cmd;
 mod extend;
-mod win32_code;
-mod winre_inspect;
 mod gpt_disk;
 mod layout;
 mod reagentc;
 mod relocation;
 mod volume;
+mod win32_code;
+mod winre_inspect;
 mod workflow;
 
 pub use extend::{boot_partition_sectors, extendable_sectors_after_boot};

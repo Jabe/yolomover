@@ -32,9 +32,10 @@ pub fn boot_partition_sectors(layout: &DiskLayout) -> Option<u64> {
 }
 
 pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
-    let boot = layout.boot_partition.as_ref().ok_or_else(|| {
-        YoloError::other("could not identify boot partition to extend")
-    })?;
+    let boot = layout
+        .boot_partition
+        .as_ref()
+        .ok_or_else(|| YoloError::other("could not identify boot partition to extend"))?;
 
     let extendable = extendable_sectors_after_boot(layout);
     if extendable == 0 {
@@ -129,20 +130,19 @@ fn extend_ntfs_volume(bytes_to_add: u64) -> Result<FsExtendResult> {
         YoloError::other(format!("extend size {bytes_to_add} bytes exceeds i64::MAX"))
     })?;
 
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{
-        CloseHandle, ERROR_INVALID_PARAMETER, HANDLE, INVALID_HANDLE_VALUE,
-    };
+    use windows::Win32::Foundation::{ERROR_INVALID_PARAMETER, HANDLE};
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows::Win32::System::Ioctl::FSCTL_EXTEND_VOLUME;
     use windows::Win32::System::IO::DeviceIoControl;
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        let handle = CreateFileW(
+    let handle = unsafe {
+        let raw = CreateFileW(
             PCWSTR(wide.as_ptr()),
             (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -154,14 +154,12 @@ fn extend_ntfs_volume(bytes_to_add: u64) -> Result<FsExtendResult> {
         .map_err(|e| YoloError::WindowsApi {
             detail: format!("CreateFileW({path:?}) for extend: {}", e.code().0),
         })?;
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(YoloError::WindowsApi {
-                detail: format!("invalid handle for {path:?}"),
-            });
-        }
+        OwnedHandle::from_raw_handle(raw.0 as _)
+    };
 
-        let result = DeviceIoControl(
-            handle,
+    let result = unsafe {
+        DeviceIoControl(
+            HANDLE(handle.as_raw_handle()),
             FSCTL_EXTEND_VOLUME,
             Some(&grow as *const i64 as *const _),
             std::mem::size_of::<i64>() as u32,
@@ -169,24 +167,23 @@ fn extend_ntfs_volume(bytes_to_add: u64) -> Result<FsExtendResult> {
             0,
             None,
             None,
-        );
-        let _ = CloseHandle(handle);
+        )
+    };
 
-        match result {
-            Ok(()) => {
-                info!(bytes_to_add, "NTFS volume extended via FSCTL_EXTEND_VOLUME");
-                Ok(FsExtendResult::Extended)
-            }
-            Err(e) if win32_code(e.code().0) == ERROR_INVALID_PARAMETER.0 => {
-                Ok(FsExtendResult::RejectedInvalidParameter)
-            }
-            Err(e) => Err(YoloError::WindowsApi {
-                detail: format!(
-                    "FSCTL_EXTEND_VOLUME on {path:?} (+{bytes_to_add} bytes): {}",
-                    e.code().0
-                ),
-            }),
+    match result {
+        Ok(()) => {
+            info!(bytes_to_add, "NTFS volume extended via FSCTL_EXTEND_VOLUME");
+            Ok(FsExtendResult::Extended)
         }
+        Err(e) if win32_code(e.code().0) == ERROR_INVALID_PARAMETER.0 => {
+            Ok(FsExtendResult::RejectedInvalidParameter)
+        }
+        Err(e) => Err(YoloError::WindowsApi {
+            detail: format!(
+                "FSCTL_EXTEND_VOLUME on {path:?} (+{bytes_to_add} bytes): {}",
+                e.code().0
+            ),
+        }),
     }
 }
 

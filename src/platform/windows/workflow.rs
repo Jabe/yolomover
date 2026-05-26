@@ -1,11 +1,12 @@
 use crate::error::{Result, YoloError};
+use crate::gpt::SECTOR_SIZE;
 use crate::platform::windows::disk::{is_elevated, system_disk_index, PhysicalDisk};
 use crate::platform::windows::extend::{extend_boot_volume, extendable_sectors_after_boot};
 use crate::platform::windows::layout::read_disk_layout;
 use crate::platform::windows::reagentc::{self, disable_winre, register_winre_after_relocate};
-use crate::platform::windows::winre_inspect::verify_winre_partition;
 use crate::platform::windows::relocation::{execute_relocation, preflight};
-use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, RelocateSummary, WinReStatus};
+use crate::platform::windows::winre_inspect::verify_winre_partition;
+use crate::types::{DiskLayout, ExtendSummary, RelocateSummary, RelocationPlan, WinReStatus};
 use tracing::info;
 
 pub fn inspect_system_disk(disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
@@ -62,7 +63,7 @@ pub fn confirm_extend(layout: &DiskLayout) -> Result<()> {
     eprintln!("  Extend boot volume {letter}");
     eprintln!(
         "  Contiguous unallocated after boot (approx): {:.1} MiB",
-        sectors as f64 * 512.0 / (1024.0 * 1024.0)
+        sectors as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
     );
     eprintln!();
     eprintln!("Type YES to continue:");

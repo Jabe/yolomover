@@ -133,7 +133,8 @@ mod tests {
                 GptPartitionEntry {
                     index: 0,
                     type_guid: GptGuid::parse_str(crate::gpt::ESP_TYPE_GUID).unwrap(),
-                    unique_guid: GptGuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                    unique_guid: GptGuid::parse_str("11111111-1111-1111-1111-111111111111")
+                        .unwrap(),
                     first_lba: 2048,
                     last_lba: 3000,
                     attributes: 0,
@@ -142,7 +143,8 @@ mod tests {
                 GptPartitionEntry {
                     index: 1,
                     type_guid: GptGuid::parse_str("E3C9E316-0B5C-4DB8-817D-F92DF00215AE").unwrap(),
-                    unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                    unique_guid: GptGuid::parse_str("22222222-2222-2222-2222-222222222222")
+                        .unwrap(),
                     first_lba: 3001,
                     last_lba: 3100,
                     attributes: 0,
@@ -151,7 +153,8 @@ mod tests {
                 GptPartitionEntry {
                     index: 2,
                     type_guid: GptGuid::parse_str(crate::gpt::MS_BASIC_DATA_GUID).unwrap(),
-                    unique_guid: GptGuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+                    unique_guid: GptGuid::parse_str("44444444-4444-4444-4444-444444444444")
+                        .unwrap(),
                     first_lba: 3101,
                     last_lba: 9000,
                     attributes: 0,

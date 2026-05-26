@@ -1,5 +1,5 @@
 use crate::error::{Result, YoloError};
-use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, RelocateSummary, WinReStatus};
+use crate::types::{DiskLayout, ExtendSummary, RelocateSummary, RelocationPlan, WinReStatus};
 
 pub fn inspect_system_disk(_disk_index: Option<u32>) -> Result<(DiskLayout, WinReStatus)> {
     Err(YoloError::NotWindows)
@@ -9,7 +9,10 @@ pub fn query_winre() -> Result<WinReStatus> {
     Err(YoloError::NotWindows)
 }
 
-pub fn inspect_winre_partition(_disk_index: u32, _partition_number: u32) -> crate::types::WinRePartitionInspect {
+pub fn inspect_winre_partition(
+    _disk_index: u32,
+    _partition_number: u32,
+) -> crate::types::WinRePartitionInspect {
     crate::types::WinRePartitionInspect {
         windows_path: String::new(),
         winre_wim_bytes: None,

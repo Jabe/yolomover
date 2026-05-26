@@ -11,7 +11,10 @@ pub fn gpt_header_crc_valid(sector: &[u8], header_size: usize) -> bool {
     if header_size < 20 || sector.len() < header_size {
         return false;
     }
-    let stored = u32::from_le_bytes(sector[16..20].try_into().expect("header crc field"));
+    let Ok(crc_bytes): Result<[u8; 4], _> = sector[16..20].try_into() else {
+        return false;
+    };
+    let stored = u32::from_le_bytes(crc_bytes);
     let mut hdr = sector[..header_size].to_vec();
     hdr[16..20].fill(0);
     efi_crc32(&hdr) == stored

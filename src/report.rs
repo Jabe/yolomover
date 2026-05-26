@@ -1,5 +1,5 @@
-use crate::plan::build_relocation_plan;
 use crate::gpt::SECTOR_SIZE;
+use crate::plan::build_relocation_plan;
 use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, WinRePartitionInspect, WinReStatus};
 use std::fmt;
 
@@ -108,7 +108,7 @@ pub fn print_extend_plan(layout: &DiskLayout) {
         println!(
             "  Status:      CAN EXTEND by approx {} sectors ({:.1} MiB)",
             sectors,
-            sectors as f64 * 512.0 / (1024.0 * 1024.0)
+            sectors as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
         );
         println!("  Command:     yolomover extend --yes");
     }
@@ -182,14 +182,14 @@ pub fn print_plan(plan: &RelocationPlan) {
     println!(
         "  Unallocated after recovery: {} sectors ({:.1} MiB)",
         slack,
-        slack as f64 * 512.0 / (1024.0 * 1024.0)
+        slack as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
     );
     if plan.already_at_end {
         println!("  Status:       nothing to do - recovery already at disk tail");
         if plan.current_first_lba != plan.target_first_lba {
             println!(
                 "  Note:         skipped ~{} MiB alignment-only nudge (no space would be freed for C:)",
-                (plan.target_first_lba - plan.current_first_lba) * 512 / (1024 * 1024)
+                (plan.target_first_lba - plan.current_first_lba) * SECTOR_SIZE / (1024 * 1024)
             );
         }
     } else if plan.needs_move() {
@@ -202,7 +202,7 @@ pub fn print_plan(plan: &RelocationPlan) {
             println!(
                 "  Extend C: into (approx): {} sectors ({:.1} MiB)",
                 freed,
-                freed as f64 * 512.0 / (1024.0 * 1024.0)
+                freed as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
             );
         }
     }

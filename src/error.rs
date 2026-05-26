@@ -33,10 +33,7 @@ pub enum YoloError {
     PartitionTooLarge { bytes: u64, max_bytes: u64 },
 
     #[error("disk {disk_index} is too small for relocation (need {need_bytes} bytes at end)")]
-    InsufficientSpace {
-        disk_index: u32,
-        need_bytes: u64,
-    },
+    InsufficientSpace { disk_index: u32, need_bytes: u64 },
 
     #[error("GPT validation failed: {detail}")]
     GptInvalid { detail: String },

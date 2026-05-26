@@ -200,8 +200,7 @@ fn probe_size_from_primary_gpt(file: &File, path: &str) -> Result<u64> {
     let mut f = file;
     f.seek(SeekFrom::Start(SECTOR_SIZE))
         .map_err(|e| io_err(path, e))?;
-    f.read_exact(&mut sector)
-        .map_err(|e| io_err(path, e))?;
+    f.read_exact(&mut sector).map_err(|e| io_err(path, e))?;
     let header = crate::gpt::GptHeader::parse(&sector)?;
     let sectors = header.backup_lba + 1;
     Ok(sectors * SECTOR_SIZE)
@@ -211,8 +210,8 @@ fn open_handle(path: &str, write: bool) -> Result<File> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -287,9 +286,7 @@ pub fn system_disk_index() -> Result<u32> {
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows::Win32::System::Ioctl::{
-        IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
-    };
+    use windows::Win32::System::Ioctl::{IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER};
     use windows::Win32::System::IO::DeviceIoControl;
 
     let path = system_volume_device_path();
