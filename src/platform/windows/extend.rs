@@ -7,7 +7,7 @@ use crate::platform::windows::diskpart_cmd::run_diskpart;
 use crate::platform::windows::layout::read_disk_layout;
 use crate::types::{DiskLayout, ExtendSummary};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use tracing::{info, warn};
+use tracing::{debug, info};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
@@ -95,7 +95,12 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let partition_bytes = after_sectors
         .checked_mul(SECTOR_SIZE)
         .ok_or_else(|| YoloError::other("partition size overflow"))?;
-    extend_filesystem_to_partition(layout, boot, partition_bytes)?;
+    extend_filesystem_to_partition(
+        layout,
+        boot,
+        partition_bytes,
+        FsExtendStrategy::AfterPartitionGrow,
+    )?;
 
     let extendable_after = extendable_sectors_after_boot(&after_layout);
     info!(
@@ -137,7 +142,12 @@ fn extend_ntfs_only(
         ntfs_bytes,
         target, "partition already grown; extending NTFS only"
     );
-    extend_filesystem_to_partition(layout, boot, partition_bytes_gpt)?;
+    extend_filesystem_to_partition(
+        layout,
+        boot,
+        partition_bytes_gpt,
+        FsExtendStrategy::FilesystemOnly,
+    )?;
     Ok(ExtendSummary {
         before_sectors,
         after_sectors: before_sectors,
@@ -145,15 +155,22 @@ fn extend_ntfs_only(
     })
 }
 
+enum FsExtendStrategy {
+    /// Partition already at target size — use diskpart `extend filesystem` directly.
+    FilesystemOnly,
+    /// Partition just grew — try FSCTL once, then diskpart.
+    AfterPartitionGrow,
+}
+
 /// Grow NTFS to fill the partition and verify Explorer-visible capacity.
 fn extend_filesystem_to_partition(
     layout: &DiskLayout,
     boot: &GptPartitionEntry,
     partition_bytes_gpt: u64,
+    strategy: FsExtendStrategy,
 ) -> Result<()> {
     let win_part = layout.windows_partition_number(boot);
     let vol_path = system_volume_device_path();
-    let part_path = partition_device_path(layout.disk_index, win_part);
 
     refresh_partition_and_volume(layout.disk_index, win_part)?;
 
@@ -174,46 +191,12 @@ fn extend_filesystem_to_partition(
         "extending NTFS into grown partition"
     );
 
-    let delta = target.saturating_sub(before);
-    let delta_i64 = i64::try_from(delta).map_err(|_| {
-        YoloError::other(format!("NTFS extend delta {delta} bytes exceeds i64::MAX"))
-    })?;
-
-    // 0 = extend NTFS to the current partition size (MSDN FSCTL_EXTEND_VOLUME).
-    for (path, grow) in [
-        (vol_path.as_str(), 0i64),
-        (part_path.as_str(), 0i64),
-        (vol_path.as_str(), delta_i64),
-        (part_path.as_str(), delta_i64),
-    ] {
-        refresh_partition_and_volume(layout.disk_index, win_part)?;
-        match fsctl_extend_volume(path, grow) {
-            Ok(()) => {
-                let after = ntfs_volume_bytes(&vol_path)?;
-                if filesystem_covers_partition(after, target) {
-                    info!(
-                        path,
-                        grow,
-                        ntfs_before = before,
-                        ntfs_after = after,
-                        target,
-                        "NTFS volume extended via FSCTL_EXTEND_VOLUME"
-                    );
-                    return Ok(());
-                }
-                warn!(
-                    path,
-                    grow,
-                    ntfs_after = after,
-                    target,
-                    "FSCTL_EXTEND_VOLUME succeeded but NTFS size unchanged"
-                );
-            }
-            Err(e) => warn!(path, grow, error = %e, "FSCTL_EXTEND_VOLUME failed"),
-        }
+    if matches!(strategy, FsExtendStrategy::AfterPartitionGrow)
+        && try_fsctl_extend(layout.disk_index, win_part, &vol_path, before, target).is_ok()
+    {
+        return Ok(());
     }
 
-    warn!("FSCTL_EXTEND_VOLUME did not grow NTFS; trying diskpart extend filesystem");
     extend_filesystem_via_diskpart(layout.disk_index, win_part)?;
     refresh_partition_and_volume(layout.disk_index, win_part)?;
 
@@ -231,6 +214,37 @@ fn extend_filesystem_to_partition(
     Err(YoloError::other(format!(
         "partition is {target} bytes but NTFS stayed at {after} bytes (was {before}); try `diskpart` → select volume C → extend filesystem"
     )))
+}
+
+/// Best-effort FSCTL; failures are normal on some hosts and fall back to diskpart.
+fn try_fsctl_extend(
+    disk_index: u32,
+    win_part: u32,
+    vol_path: &str,
+    before: u64,
+    target: u64,
+) -> Result<()> {
+    refresh_partition_and_volume(disk_index, win_part)?;
+    match fsctl_extend_volume(vol_path, 0) {
+        Ok(()) => {
+            let after = ntfs_volume_bytes(vol_path)?;
+            if filesystem_covers_partition(after, target) {
+                info!(
+                    ntfs_before = before,
+                    ntfs_after = after,
+                    target,
+                    "NTFS volume extended via FSCTL_EXTEND_VOLUME"
+                );
+                return Ok(());
+            }
+            debug!(
+                ntfs_after = after,
+                target, "FSCTL_EXTEND_VOLUME succeeded but NTFS size unchanged"
+            );
+        }
+        Err(e) => debug!(error = %e, "FSCTL_EXTEND_VOLUME unavailable"),
+    }
+    Err(YoloError::other("FSCTL did not extend NTFS"))
 }
 
 fn partition_device_path(disk_index: u32, partition_number: u32) -> String {
@@ -430,11 +444,12 @@ fn extend_filesystem_via_diskpart(disk_index: u32, partition_number: u32) -> Res
     for script in &scripts {
         match run_diskpart(script) {
             Ok(output) => {
-                info!(output = output.trim(), "diskpart extend filesystem");
+                debug!(output = output.trim(), "diskpart extend filesystem");
+                info!("NTFS extended via diskpart extend filesystem");
                 return Ok(());
             }
             Err(e) => {
-                warn!(error = %e, "diskpart extend filesystem attempt failed");
+                debug!(error = %e, "diskpart extend filesystem attempt failed");
                 last_err = Some(e);
             }
         }
