@@ -104,6 +104,7 @@ pub fn print_extend_plan(layout: &DiskLayout) {
     println!("  Boot volume: {letter}");
     if sectors == 0 {
         println!("  Status:      no contiguous unallocated space after boot volume");
+        println!("  Note:        if Explorer is smaller than Disk Management, run extend anyway");
     } else {
         println!(
             "  Status:      CAN EXTEND by approx {} sectors ({:.1} MiB)",

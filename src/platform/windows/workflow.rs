@@ -61,10 +61,14 @@ pub fn confirm_extend(layout: &DiskLayout) -> Result<()> {
     eprintln!();
     eprintln!("About to:");
     eprintln!("  Extend boot volume {letter}");
-    eprintln!(
-        "  Contiguous unallocated after boot (approx): {:.1} MiB",
-        sectors as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
-    );
+    if sectors == 0 {
+        eprintln!("  Grow NTFS into the current partition (partition may already be enlarged)");
+    } else {
+        eprintln!(
+            "  Contiguous unallocated after boot (approx): {:.1} MiB",
+            sectors as f64 * SECTOR_SIZE as f64 / (1024.0 * 1024.0)
+        );
+    }
     eprintln!();
     eprintln!("Type YES to continue:");
     let mut line = String::new();

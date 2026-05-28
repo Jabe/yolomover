@@ -143,13 +143,6 @@ fn cmd_extend(disk: Option<u32>, yes: bool) -> Result<()> {
     print_disk_layout(&layout);
     print_extend_plan(&layout);
 
-    let sectors = platform::extendable_sectors_after_boot(&layout);
-    if sectors == 0 {
-        return Err(YoloError::other(
-            "no contiguous unallocated space after the boot partition",
-        ));
-    }
-
     platform::confirm_extend(&layout)?;
     let summary = platform::extend_boot_partition(&layout)?;
     println!();
