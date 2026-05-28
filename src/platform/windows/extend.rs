@@ -1,7 +1,7 @@
 //! Extend the system boot volume into adjacent unallocated space.
 
 use crate::error::{Result, YoloError};
-use crate::gpt::SECTOR_SIZE;
+use crate::gpt::{GptPartitionEntry, SECTOR_SIZE};
 use crate::platform::windows::disk::{system_volume_device_path, PhysicalDisk};
 use crate::platform::windows::diskpart_cmd::run_diskpart;
 use crate::platform::windows::layout::read_disk_layout;
@@ -14,7 +14,11 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, IOCTL_VOLUME_UPDATE_PROPERTIES, OPEN_EXISTING,
 };
-use windows::Win32::System::Ioctl::{FSCTL_EXTEND_VOLUME, FSCTL_GET_NTFS_VOLUME_DATA};
+use windows::Win32::System::Ioctl::{
+    DISK_GEOMETRY, FSCTL_EXTEND_VOLUME, FSCTL_GET_NTFS_VOLUME_DATA,
+    IOCTL_DISK_GET_PARTITION_INFO_EX, IOCTL_DISK_UPDATE_DRIVE_SIZE, NTFS_VOLUME_DATA_BUFFER,
+    PARTITION_INFORMATION_EX,
+};
 use windows::Win32::System::IO::DeviceIoControl;
 
 /// Contiguous unallocated sectors immediately after the boot partition.
@@ -52,7 +56,7 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     })?;
 
     if extendable == 0 {
-        return extend_ntfs_only(layout, before_sectors);
+        return extend_ntfs_only(layout, boot, before_sectors);
     }
 
     let letter = system_drive_letter();
@@ -91,7 +95,7 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
     let partition_bytes = after_sectors
         .checked_mul(SECTOR_SIZE)
         .ok_or_else(|| YoloError::other("partition size overflow"))?;
-    extend_filesystem_to_partition(partition_bytes)?;
+    extend_filesystem_to_partition(layout, boot, partition_bytes)?;
 
     let extendable_after = extendable_sectors_after_boot(&after_layout);
     info!(
@@ -109,23 +113,31 @@ pub fn extend_boot_volume(layout: &DiskLayout) -> Result<ExtendSummary> {
 }
 
 /// Partition already fills available space but NTFS may still be short (e.g. after a prior run).
-fn extend_ntfs_only(_layout: &DiskLayout, before_sectors: u64) -> Result<ExtendSummary> {
-    let partition_bytes = before_sectors
+fn extend_ntfs_only(
+    layout: &DiskLayout,
+    boot: &GptPartitionEntry,
+    before_sectors: u64,
+) -> Result<ExtendSummary> {
+    let partition_bytes_gpt = before_sectors
         .checked_mul(SECTOR_SIZE)
         .ok_or_else(|| YoloError::other("partition size overflow"))?;
-    let path = system_volume_device_path();
-    volume_update_properties(&path)?;
-    let ntfs_bytes = ntfs_volume_bytes(&path)?;
-    if filesystem_covers_partition(ntfs_bytes, partition_bytes) {
+    refresh_partition_and_volume(layout.disk_index, layout.windows_partition_number(boot))?;
+    let ntfs_bytes = ntfs_volume_bytes(&system_volume_device_path())?;
+    let target = target_partition_bytes(
+        layout.disk_index,
+        layout.windows_partition_number(boot),
+        partition_bytes_gpt,
+    )?;
+    if filesystem_covers_partition(ntfs_bytes, target) {
         return Err(YoloError::other(
             "no contiguous unallocated space after the boot partition; run inspect to verify layout",
         ));
     }
     info!(
         ntfs_bytes,
-        partition_bytes, "partition already grown; extending NTFS only"
+        target, "partition already grown; extending NTFS only"
     );
-    extend_filesystem_to_partition(partition_bytes)?;
+    extend_filesystem_to_partition(layout, boot, partition_bytes_gpt)?;
     Ok(ExtendSummary {
         before_sectors,
         after_sectors: before_sectors,
@@ -133,70 +145,157 @@ fn extend_ntfs_only(_layout: &DiskLayout, before_sectors: u64) -> Result<ExtendS
     })
 }
 
-/// Grow NTFS to fill the GPT partition and verify Explorer-visible capacity.
-fn extend_filesystem_to_partition(partition_bytes: u64) -> Result<()> {
-    let path = system_volume_device_path();
-    volume_update_properties(&path)?;
+/// Grow NTFS to fill the partition and verify Explorer-visible capacity.
+fn extend_filesystem_to_partition(
+    layout: &DiskLayout,
+    boot: &GptPartitionEntry,
+    partition_bytes_gpt: u64,
+) -> Result<()> {
+    let win_part = layout.windows_partition_number(boot);
+    let vol_path = system_volume_device_path();
+    let part_path = partition_device_path(layout.disk_index, win_part);
 
-    let before = ntfs_volume_bytes(&path)?;
-    if filesystem_covers_partition(before, partition_bytes) {
+    refresh_partition_and_volume(layout.disk_index, win_part)?;
+
+    let target = target_partition_bytes(layout.disk_index, win_part, partition_bytes_gpt)?;
+    let before = ntfs_volume_bytes(&vol_path)?;
+    if filesystem_covers_partition(before, target) {
         info!(
             ntfs_bytes = before,
-            partition_bytes, "NTFS volume already fills the partition"
+            target, "NTFS volume already fills the partition"
         );
         return Ok(());
     }
 
     info!(
         ntfs_bytes = before,
-        partition_bytes,
-        need_bytes = partition_bytes.saturating_sub(before),
+        target,
+        need_bytes = target.saturating_sub(before),
         "extending NTFS into grown partition"
     );
 
-    let delta = partition_bytes.saturating_sub(before);
-    // 0 means "extend to the current partition size" per FSCTL_EXTEND_VOLUME.
-    for grow in [
-        0i64,
-        i64::try_from(delta).map_err(|_| {
-            YoloError::other(format!("NTFS extend delta {delta} bytes exceeds i64::MAX"))
-        })?,
+    let delta = target.saturating_sub(before);
+    let delta_i64 = i64::try_from(delta).map_err(|_| {
+        YoloError::other(format!("NTFS extend delta {delta} bytes exceeds i64::MAX"))
+    })?;
+
+    // 0 = extend NTFS to the current partition size (MSDN FSCTL_EXTEND_VOLUME).
+    for (path, grow) in [
+        (vol_path.as_str(), 0i64),
+        (part_path.as_str(), 0i64),
+        (vol_path.as_str(), delta_i64),
+        (part_path.as_str(), delta_i64),
     ] {
-        volume_update_properties(&path)?;
-        if fsctl_extend_volume(&path, grow).is_ok() {
-            volume_update_properties(&path)?;
-            let after = ntfs_volume_bytes(&path)?;
-            if filesystem_covers_partition(after, partition_bytes) {
-                info!(
-                    ntfs_before = before,
-                    ntfs_after = after,
-                    partition_bytes,
+        refresh_partition_and_volume(layout.disk_index, win_part)?;
+        match fsctl_extend_volume(path, grow) {
+            Ok(()) => {
+                let after = ntfs_volume_bytes(&vol_path)?;
+                if filesystem_covers_partition(after, target) {
+                    info!(
+                        path,
+                        grow,
+                        ntfs_before = before,
+                        ntfs_after = after,
+                        target,
+                        "NTFS volume extended via FSCTL_EXTEND_VOLUME"
+                    );
+                    return Ok(());
+                }
+                warn!(
+                    path,
                     grow,
-                    "NTFS volume extended via FSCTL_EXTEND_VOLUME"
+                    ntfs_after = after,
+                    target,
+                    "FSCTL_EXTEND_VOLUME succeeded but NTFS size unchanged"
                 );
-                return Ok(());
             }
+            Err(e) => warn!(path, grow, error = %e, "FSCTL_EXTEND_VOLUME failed"),
         }
     }
 
-    warn!("FSCTL_EXTEND_VOLUME did not grow NTFS; trying diskpart extend");
-    extend_via_diskpart()?;
-    volume_update_properties(&path)?;
+    warn!("FSCTL_EXTEND_VOLUME did not grow NTFS; trying diskpart extend filesystem");
+    extend_filesystem_via_diskpart(layout.disk_index, win_part)?;
+    refresh_partition_and_volume(layout.disk_index, win_part)?;
 
-    let after = ntfs_volume_bytes(&path)?;
-    if filesystem_covers_partition(after, partition_bytes) {
+    let after = ntfs_volume_bytes(&vol_path)?;
+    if filesystem_covers_partition(after, target) {
         info!(
             ntfs_before = before,
             ntfs_after = after,
-            partition_bytes,
+            target,
             "NTFS volume extended via diskpart"
         );
         return Ok(());
     }
 
     Err(YoloError::other(format!(
-        "partition grew to {partition_bytes} bytes but NTFS stayed at {after} bytes (was {before}); try `diskpart` → select volume C → extend"
+        "partition is {target} bytes but NTFS stayed at {after} bytes (was {before}); try `diskpart` → select volume C → extend filesystem"
     )))
+}
+
+fn partition_device_path(disk_index: u32, partition_number: u32) -> String {
+    format!(r"\\?\GLOBALROOT\device\harddisk{disk_index}\partition{partition_number}")
+}
+
+fn target_partition_bytes(
+    disk_index: u32,
+    partition_number: u32,
+    partition_bytes_gpt: u64,
+) -> Result<u64> {
+    let driver = query_partition_length_bytes(disk_index, partition_number)?;
+    Ok(partition_bytes_gpt.max(driver))
+}
+
+fn refresh_partition_and_volume(disk_index: u32, partition_number: u32) -> Result<()> {
+    sync_partition_drive_size(disk_index, partition_number)?;
+    volume_update_properties(&system_volume_device_path())
+}
+
+fn sync_partition_drive_size(disk_index: u32, partition_number: u32) -> Result<()> {
+    let path = partition_device_path(disk_index, partition_number);
+    let handle = open_device(&path)?;
+    let mut geometry = DISK_GEOMETRY::default();
+    unsafe {
+        DeviceIoControl(
+            HANDLE(handle.as_raw_handle()),
+            IOCTL_DISK_UPDATE_DRIVE_SIZE,
+            None,
+            0,
+            Some(&mut geometry as *mut _ as *mut _),
+            std::mem::size_of::<DISK_GEOMETRY>() as u32,
+            None,
+            None,
+        )
+        .map_err(|e| YoloError::WindowsApi {
+            detail: format!("IOCTL_DISK_UPDATE_DRIVE_SIZE on {path:?}: {}", e.code().0),
+        })?;
+    }
+    Ok(())
+}
+
+fn query_partition_length_bytes(disk_index: u32, partition_number: u32) -> Result<u64> {
+    let path = partition_device_path(disk_index, partition_number);
+    let handle = open_device(&path)?;
+    let mut info = PARTITION_INFORMATION_EX::default();
+    unsafe {
+        DeviceIoControl(
+            HANDLE(handle.as_raw_handle()),
+            IOCTL_DISK_GET_PARTITION_INFO_EX,
+            None,
+            0,
+            Some(&mut info as *mut _ as *mut _),
+            std::mem::size_of::<PARTITION_INFORMATION_EX>() as u32,
+            None,
+            None,
+        )
+        .map_err(|e| YoloError::WindowsApi {
+            detail: format!(
+                "IOCTL_DISK_GET_PARTITION_INFO_EX on {path:?}: {}",
+                e.code().0
+            ),
+        })?;
+    }
+    Ok(info.PartitionLength as u64)
 }
 
 fn filesystem_covers_partition(fs_bytes: u64, partition_bytes: u64) -> bool {
@@ -206,7 +305,7 @@ fn filesystem_covers_partition(fs_bytes: u64, partition_bytes: u64) -> bool {
     fs_bytes.saturating_add(cluster.saturating_sub(1)) >= partition_bytes
 }
 
-fn open_volume_device(path: &str) -> Result<OwnedHandle> {
+fn open_device(path: &str) -> Result<OwnedHandle> {
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let raw = CreateFileW(
@@ -226,7 +325,7 @@ fn open_volume_device(path: &str) -> Result<OwnedHandle> {
 }
 
 fn volume_update_properties(path: &str) -> Result<()> {
-    let handle = open_volume_device(path)?;
+    let handle = open_device(path)?;
     unsafe {
         DeviceIoControl(
             HANDLE(handle.as_raw_handle()),
@@ -246,8 +345,8 @@ fn volume_update_properties(path: &str) -> Result<()> {
 }
 
 fn ntfs_volume_bytes(path: &str) -> Result<u64> {
-    let handle = open_volume_device(path)?;
-    let mut data = windows::Win32::System::Ioctl::NTFS_VOLUME_DATA_BUFFER::default();
+    let handle = open_device(path)?;
+    let mut data = NTFS_VOLUME_DATA_BUFFER::default();
     unsafe {
         DeviceIoControl(
             HANDLE(handle.as_raw_handle()),
@@ -255,7 +354,7 @@ fn ntfs_volume_bytes(path: &str) -> Result<u64> {
             None,
             0,
             Some(&mut data as *mut _ as *mut _),
-            std::mem::size_of::<windows::Win32::System::Ioctl::NTFS_VOLUME_DATA_BUFFER>() as u32,
+            std::mem::size_of::<NTFS_VOLUME_DATA_BUFFER>() as u32,
             None,
             None,
         )
@@ -269,9 +368,12 @@ fn ntfs_volume_bytes(path: &str) -> Result<u64> {
 }
 
 fn ntfs_cluster_bytes() -> Result<u64> {
-    let path = system_volume_device_path();
-    let handle = open_volume_device(&path)?;
-    let mut data = windows::Win32::System::Ioctl::NTFS_VOLUME_DATA_BUFFER::default();
+    ntfs_volume_data(&system_volume_device_path()).map(|d| d.BytesPerCluster as u64)
+}
+
+fn ntfs_volume_data(path: &str) -> Result<NTFS_VOLUME_DATA_BUFFER> {
+    let handle = open_device(path)?;
+    let mut data = NTFS_VOLUME_DATA_BUFFER::default();
     unsafe {
         DeviceIoControl(
             HANDLE(handle.as_raw_handle()),
@@ -279,7 +381,7 @@ fn ntfs_cluster_bytes() -> Result<u64> {
             None,
             0,
             Some(&mut data as *mut _ as *mut _),
-            std::mem::size_of::<windows::Win32::System::Ioctl::NTFS_VOLUME_DATA_BUFFER>() as u32,
+            std::mem::size_of::<NTFS_VOLUME_DATA_BUFFER>() as u32,
             None,
             None,
         )
@@ -287,11 +389,11 @@ fn ntfs_cluster_bytes() -> Result<u64> {
             detail: format!("FSCTL_GET_NTFS_VOLUME_DATA on {path:?}: {}", e.code().0),
         })?;
     }
-    Ok(data.BytesPerCluster as u64)
+    Ok(data)
 }
 
 fn fsctl_extend_volume(path: &str, grow_bytes: i64) -> Result<()> {
-    let handle = open_volume_device(path)?;
+    let handle = open_device(path)?;
     unsafe {
         DeviceIoControl(
             HANDLE(handle.as_raw_handle()),
@@ -313,10 +415,32 @@ fn fsctl_extend_volume(path: &str, grow_bytes: i64) -> Result<()> {
     Ok(())
 }
 
-fn extend_via_diskpart() -> Result<()> {
+/// When the partition is already full, `extend` is a no-op — grow the filesystem explicitly.
+fn extend_filesystem_via_diskpart(disk_index: u32, partition_number: u32) -> Result<()> {
     let letter = system_drive_letter();
-    let script = format!("select volume {letter}\nextend\nexit\n");
-    run_diskpart(&script).map(|_| ())
+    let scripts = [
+        format!("select volume={letter}:\nextend filesystem\nexit\n"),
+        format!(
+            "select disk {disk_index}\nselect partition {partition_number}\nextend filesystem\nexit\n"
+        ),
+        format!("select volume={letter}:\nextend\nextend filesystem\nexit\n"),
+    ];
+
+    let mut last_err = None;
+    for script in &scripts {
+        match run_diskpart(script) {
+            Ok(output) => {
+                info!(output = output.trim(), "diskpart extend filesystem");
+                return Ok(());
+            }
+            Err(e) => {
+                warn!(error = %e, "diskpart extend filesystem attempt failed");
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err
+        .unwrap_or_else(|| YoloError::other("diskpart extend filesystem failed with no detail")))
 }
 
 fn system_drive_letter() -> String {
