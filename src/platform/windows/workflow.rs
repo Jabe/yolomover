@@ -109,22 +109,37 @@ pub fn relocate_workflow(plan: &RelocationPlan, dry_run: bool) -> Result<Relocat
         });
     }
 
-    if plan.needs_move() {
+    let win_part = if plan.needs_move() {
         disable_winre()?;
         run_relocation(plan, false)?;
-        let win_part = plan.disk.windows_partition_number(&plan.recovery);
+        // The move can change the recovery partition's position in disk order;
+        // recompute the Windows partition number from the on-disk layout.
+        let win_part = post_move_partition_number(plan)?;
         register_winre_after_relocate(plan.disk.disk_index, win_part)?;
+        win_part
     } else {
         info!("recovery already at end - skipping relocation");
-    }
+        plan.disk.windows_partition_number(&plan.recovery)
+    };
 
-    let win_part = plan.disk.windows_partition_number(&plan.recovery);
     let winre_verified = verify_winre_partition(plan.disk.disk_index, win_part)?;
 
     Ok(RelocateSummary {
         relocated: plan.needs_move(),
         winre_verified,
     })
+}
+
+fn post_move_partition_number(plan: &RelocationPlan) -> Result<u32> {
+    let mut disk = PhysicalDisk::open_readonly(plan.disk.disk_index)?;
+    let layout = read_disk_layout(&mut disk)?;
+    let recovery = layout
+        .recovery
+        .as_ref()
+        .ok_or(YoloError::RecoveryNotFound {
+            disk_index: layout.disk_index,
+        })?;
+    Ok(layout.windows_partition_number(recovery))
 }
 
 fn ensure_elevated() -> Result<()> {

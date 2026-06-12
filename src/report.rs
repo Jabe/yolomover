@@ -1,7 +1,5 @@
 use crate::gpt::SECTOR_SIZE;
-use crate::plan::build_relocation_plan;
 use crate::types::{DiskLayout, ExtendSummary, RelocationPlan, WinRePartitionInspect, WinReStatus};
-use std::fmt;
 
 pub fn print_banner() {
     eprintln!(
@@ -233,15 +231,4 @@ fn estimate_freed_sectors(plan: &RelocationPlan) -> u64 {
         }
     }
     recovery.first_lba.saturating_sub(prev_end)
-}
-
-pub fn format_inspection(layout: &DiskLayout, winre: &WinReStatus) -> String {
-    let mut out = String::new();
-    let _ = fmt::write(&mut out, format_args!("{}\n", layout.disk_index));
-    print_disk_layout(layout);
-    print_winre(winre);
-    if let Ok(plan) = build_relocation_plan(layout) {
-        print_plan(&plan);
-    }
-    out
 }

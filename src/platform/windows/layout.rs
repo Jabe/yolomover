@@ -126,11 +126,6 @@ fn pick_boot_partition(
         if recovery_idx == Some(p.index) {
             continue;
         }
-        if let Some(r) = recovery_idx {
-            if p.index == r {
-                continue;
-            }
-        }
         if best.map(|b| p.byte_size() > b.byte_size()).unwrap_or(true) {
             best = Some(p);
         }

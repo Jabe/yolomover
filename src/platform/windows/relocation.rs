@@ -4,7 +4,7 @@ use crate::platform::windows::disk::PhysicalDisk;
 use crate::platform::windows::gpt_disk::GptOnDisk;
 use crate::platform::windows::volume::VolumeGuard;
 use crate::types::RelocationPlan;
-use tracing::info;
+use tracing::{info, warn};
 
 const COPY_CHUNK_SECTORS: u64 = 2048; // 1 MiB
 
@@ -44,6 +44,12 @@ pub fn execute_relocation(disk: &mut PhysicalDisk, plan: &RelocationPlan) -> Res
         plan.target_last_lba,
     )?;
     gpt.commit(disk)?;
+
+    // Tell the storage stack the partition table changed; diskpart rescan later
+    // in the workflow is only best-effort.
+    if let Err(e) = disk.update_properties() {
+        warn!(error = %e, "IOCTL_DISK_UPDATE_PROPERTIES failed; OS view of the partition table may be stale until rescan");
+    }
 
     info!("recovery partition relocated");
     Ok(())

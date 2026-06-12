@@ -124,7 +124,6 @@ fn cmd_relocate(disk: Option<u32>, yes: bool, dry_run: bool) -> Result<()> {
         eprintln!();
     }
 
-    let _ = winre;
     Ok(())
 }
 

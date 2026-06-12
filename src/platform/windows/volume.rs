@@ -82,7 +82,17 @@ fn try_lock_volume(
     first_lba: u64,
     last_lba: u64,
 ) -> Result<Option<OwnedHandle>> {
-    let handle = open_volume(volume_name)?;
+    let handle = match open_volume(volume_name) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!(
+                volume = %utf16_lossy(volume_name),
+                error = %e,
+                "could not open volume; continuing with physical disk exclusive access"
+            );
+            return Ok(None);
+        }
+    };
     if !volume_overlaps(handle.as_raw_handle(), disk_index, first_lba, last_lba)? {
         return Ok(None);
     }
@@ -91,11 +101,18 @@ fn try_lock_volume(
 }
 
 fn open_volume(volume_name: &[u16]) -> Result<OwnedHandle> {
-    let wide: Vec<u16> = volume_name
+    // FindFirstVolumeW returns `\\?\Volume{GUID}\`. With the trailing backslash,
+    // CreateFileW opens the filesystem root directory instead of the volume device
+    // and volume IOCTLs fail — strip it.
+    let end = volume_name
         .iter()
-        .copied()
-        .chain(std::iter::once(0))
-        .collect();
+        .position(|&c| c == 0)
+        .unwrap_or(volume_name.len());
+    let mut wide: Vec<u16> = volume_name[..end].to_vec();
+    if wide.last() == Some(&u16::from(b'\\')) {
+        wide.pop();
+    }
+    wide.push(0);
     unsafe {
         let raw = CreateFileW(
             PCWSTR(wide.as_ptr()),
@@ -113,14 +130,20 @@ fn open_volume(volume_name: &[u16]) -> Result<OwnedHandle> {
     }
 }
 
+/// `VOLUME_DISK_EXTENTS` with room for additional extents, properly aligned.
+#[repr(C)]
+struct VolumeExtentsBuf {
+    info: VOLUME_DISK_EXTENTS,
+    _extra: [DISK_EXTENT; MAX_EXTENTS - 1],
+}
+
 fn volume_overlaps(
     handle: std::os::windows::io::RawHandle,
     disk_index: u32,
     first_lba: u64,
     last_lba: u64,
 ) -> Result<bool> {
-    let mut buf = [0u8; std::mem::size_of::<VOLUME_DISK_EXTENTS>()
-        + MAX_EXTENTS * std::mem::size_of::<DISK_EXTENT>()];
+    let mut buf: VolumeExtentsBuf = unsafe { std::mem::zeroed() };
     let mut returned = 0u32;
     let ok = unsafe {
         DeviceIoControl(
@@ -128,8 +151,8 @@ fn volume_overlaps(
             IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
             None,
             0,
-            Some(buf.as_mut_ptr() as *mut _),
-            buf.len() as u32,
+            Some(&mut buf as *mut _ as *mut _),
+            std::mem::size_of::<VolumeExtentsBuf>() as u32,
             Some(&mut returned),
             None,
         )
@@ -137,9 +160,12 @@ fn volume_overlaps(
     if ok.is_err() {
         return Ok(false);
     }
-    let extents = unsafe { &*(buf.as_ptr() as *const VOLUME_DISK_EXTENTS) };
-    for i in 0..extents.NumberOfDiskExtents as usize {
-        let ext = extents.Extents[i];
+    let count = (buf.info.NumberOfDiskExtents as usize).min(MAX_EXTENTS);
+    // Extents beyond the first overflow the declared [DISK_EXTENT; 1] field into
+    // `_extra`; index through a raw pointer instead of the array.
+    let extents = std::ptr::addr_of!(buf.info.Extents) as *const DISK_EXTENT;
+    for i in 0..count {
+        let ext = unsafe { *extents.add(i) };
         if ext.DiskNumber != disk_index {
             continue;
         }

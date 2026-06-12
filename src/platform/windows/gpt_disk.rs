@@ -3,8 +3,8 @@
 use crate::error::{Result, YoloError};
 use crate::gpt::{
     backup_header_lba_for_disk_sectors, disk_sector_count, efi_crc32, gpt_header_crc_valid,
-    last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry, PARTITION_ARRAY_SECTORS,
-    PARTITION_COUNT, PARTITION_ENTRY_SIZE, SECTOR_SIZE,
+    last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry, PARTITION_COUNT,
+    PARTITION_ENTRY_SIZE, SECTOR_SIZE,
 };
 use crate::platform::windows::disk::PhysicalDisk;
 use tracing::info;
@@ -17,22 +17,42 @@ pub struct GptOnDisk {
     pub entry_lba: u64,
     pub backup_header_lba: u64,
     pub backup_entry_lba: u64,
+    /// Sectors occupied by the partition entry array (`partition_count` entries).
+    array_sectors: u64,
 }
 
 impl GptOnDisk {
     pub fn load(disk: &mut PhysicalDisk) -> Result<Self> {
         let sector = disk.read_one_sector(PRIMARY_HEADER_LBA)?;
         let primary_header = GptHeader::parse(&sector)?;
+
+        if primary_header.partition_entry_size as usize != PARTITION_ENTRY_SIZE {
+            return Err(YoloError::GptInvalid {
+                detail: format!(
+                    "unexpected partition entry size {}",
+                    primary_header.partition_entry_size
+                ),
+            });
+        }
+        let count = primary_header.partition_count as usize;
+        if count == 0 || count > PARTITION_COUNT {
+            return Err(YoloError::GptInvalid {
+                detail: format!("unsupported partition count {count}"),
+            });
+        }
+
         let entry_lba = primary_header.partition_entry_lba;
+        let array_bytes = count * PARTITION_ENTRY_SIZE;
+        let array_sectors = (array_bytes as u64).div_ceil(SECTOR_SIZE);
         let disk_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
         let backup_header_lba = backup_header_lba_for_disk_sectors(disk_sectors);
-        let backup_entry_lba = backup_header_lba.saturating_sub(PARTITION_ARRAY_SECTORS);
+        let backup_entry_lba = backup_header_lba.saturating_sub(array_sectors);
 
-        let mut raw = vec![0u8; partition_array_bytes()];
-        disk.read_sectors(entry_lba, PARTITION_ARRAY_SECTORS, &mut raw)?;
+        let mut raw = vec![0u8; (array_sectors * SECTOR_SIZE) as usize];
+        disk.read_sectors(entry_lba, array_sectors, &mut raw)?;
 
         let mut entries = Vec::new();
-        for i in 0..primary_header.partition_count as usize {
+        for i in 0..count {
             let off = i * PARTITION_ENTRY_SIZE;
             let slice = &raw[off..off + PARTITION_ENTRY_SIZE];
             let entry = GptPartitionEntry::parse(i as u32, slice)?;
@@ -45,6 +65,7 @@ impl GptOnDisk {
             entry_lba,
             backup_header_lba,
             backup_entry_lba,
+            array_sectors,
         })
     }
 
@@ -68,16 +89,17 @@ impl GptOnDisk {
     pub fn commit(&mut self, disk: &mut PhysicalDisk) -> Result<()> {
         self.sync_device_geometry(disk);
         let entries_raw = self.serialize_entries()?;
+        // The array CRC covers exactly partition_count entries, not sector padding.
         self.primary_header = self
             .primary_header
             .clone()
-            .with_partition_array_crc(&entries_raw);
+            .with_partition_array_crc(&entries_raw[..self.array_bytes()]);
 
         info!("writing primary GPT partition array");
-        disk.write_sectors(self.entry_lba, PARTITION_ARRAY_SECTORS, &entries_raw)?;
+        disk.write_sectors(self.entry_lba, self.array_sectors, &entries_raw)?;
 
         info!("writing backup GPT partition array");
-        disk.write_sectors(self.backup_entry_lba, PARTITION_ARRAY_SECTORS, &entries_raw)?;
+        disk.write_sectors(self.backup_entry_lba, self.array_sectors, &entries_raw)?;
 
         let mut primary_sector = vec![0u8; SECTOR_SIZE as usize];
         self.primary_header.write_to_sector(&mut primary_sector)?;
@@ -96,11 +118,13 @@ impl GptOnDisk {
     fn sync_device_geometry(&mut self, disk: &PhysicalDisk) {
         let disk_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
         self.backup_header_lba = backup_header_lba_for_disk_sectors(disk_sectors);
-        self.backup_entry_lba = self
-            .backup_header_lba
-            .saturating_sub(PARTITION_ARRAY_SECTORS);
+        self.backup_entry_lba = self.backup_header_lba.saturating_sub(self.array_sectors);
         self.primary_header.backup_lba = self.backup_header_lba;
         self.primary_header.last_usable_lba = last_usable_lba_for_disk_sectors(disk_sectors);
+    }
+
+    fn array_bytes(&self) -> usize {
+        self.primary_header.partition_count as usize * PARTITION_ENTRY_SIZE
     }
 
     fn backup_header(&self) -> GptHeader {
@@ -112,9 +136,9 @@ impl GptOnDisk {
     }
 
     fn serialize_entries(&self) -> Result<Vec<u8>> {
-        let mut raw = vec![0u8; partition_array_bytes()];
+        let mut raw = vec![0u8; (self.array_sectors * SECTOR_SIZE) as usize];
         for entry in &self.entries {
-            if entry.index as usize >= PARTITION_COUNT {
+            if entry.index as usize >= self.primary_header.partition_count as usize {
                 return Err(YoloError::GptInvalid {
                     detail: format!("partition index {} out of range", entry.index),
                 });
@@ -126,7 +150,7 @@ impl GptOnDisk {
     }
 
     fn verify_crc(&self, disk: &mut PhysicalDisk, entries_raw: &[u8]) -> Result<()> {
-        let array_crc = efi_crc32(entries_raw);
+        let array_crc = efi_crc32(&entries_raw[..self.array_bytes()]);
         if array_crc != self.primary_header.partition_array_crc32 {
             return Err(YoloError::GptInvalid {
                 detail: "partition array CRC mismatch after write".into(),
@@ -147,8 +171,4 @@ impl GptOnDisk {
         }
         Ok(())
     }
-}
-
-fn partition_array_bytes() -> usize {
-    (PARTITION_ARRAY_SECTORS * SECTOR_SIZE) as usize
 }

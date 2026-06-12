@@ -1,5 +1,4 @@
 use crate::gpt::{CopyStrategy, GptPartitionEntry};
-use std::fmt;
 
 /// Output of `reagentc /info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,11 +166,5 @@ mod tests {
         };
         let r = layout.recovery.as_ref().unwrap();
         assert_eq!(layout.windows_partition_number(r), 4);
-    }
-}
-
-impl fmt::Display for WinReStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WinRE")
     }
 }

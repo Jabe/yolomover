@@ -1,6 +1,6 @@
 use crate::error::{Result, YoloError};
 use crate::gpt::{
-    align_down, copy_strategy, end_aligned_start, CopyStrategy, LbaRange, ALIGN_SECTORS,
+    copy_strategy, end_aligned_start, CopyStrategy, LbaRange, ALIGN_SECTORS,
     MAX_BUFFERED_COPY_BYTES, SECTOR_SIZE,
 };
 use crate::types::{DiskLayout, RelocationPlan};
@@ -131,7 +131,6 @@ fn validate_target(
         });
     }
 
-    let _ = align_down(target.first, ALIGN_SECTORS);
     Ok(())
 }
 
