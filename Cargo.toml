@@ -1,6 +1,6 @@
 [package]
 name = "yolomover"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "Move the Windows Recovery partition to the end of the disk (YOLO, but checked twice)"
 license = "MIT"
