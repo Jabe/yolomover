@@ -1,6 +1,16 @@
 # yolomover
 
-**Move the Windows Recovery partition to the end of the disk** so you can extend the boot volume — without manually chaining `reagentc /disable`, a partition GUI, `reagentc /enable`, and `extend` every time.
+[![Release](https://img.shields.io/github/v/release/Jabe/yolomover)](https://github.com/Jabe/yolomover/releases/latest)
+[![Windows CI](https://github.com/Jabe/yolomover/actions/workflows/windows.yml/badge.svg)](https://github.com/Jabe/yolomover/actions/workflows/windows.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
+
+**Move the Windows Recovery partition to the end of the disk** so you can extend the boot volume (C:).
+
+On Windows 10/11, **Extend Volume is often greyed out** because the WinRE recovery partition sits between C: and unallocated space. yolomover relocates that partition to the disk tail and then grows the OS volume — without manually chaining `reagentc /disable`, a partition GUI, `reagentc /enable`, and `extend` every time.
+
+[Download the latest Windows binary](https://github.com/Jabe/yolomover/releases/latest) · [Releases](https://github.com/Jabe/yolomover/releases)
+
+![Disk layout before and after: Recovery blocks unallocated space, then Recovery sits at the end and C: is extended](docs/before-after.svg)
 
 > The name is intentional. Repartitioning the system disk is high-risk. yolomover checks aggressively, warns loudly, and defaults to dry-run / confirmation.
 

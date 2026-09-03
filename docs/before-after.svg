@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 280" role="img" aria-labelledby="title desc">
+  <title id="title">yolomover: move the Windows Recovery partition to the end of the disk</title>
+  <desc id="desc">Before: EFI, MSR, C: Windows, Recovery, then unallocated space — Extend Volume is blocked. After: C: is extended and Recovery sits at the end of the disk.</desc>
+  <style>
+    .panel { fill: #ffffff; }
+    .muted { fill: #656d76; }
+    .ink { fill: #1f2328; }
+    .stroke { stroke: #d0d7de; }
+    .efi { fill: #ddf4ff; }
+    .msr { fill: #fff8c5; }
+    .win { fill: #ddf4ff; }
+    .rec { fill: #ffcecb; }
+    .free { fill: #f6f8fa; stroke-dasharray: 4 3; }
+    .win-after { fill: #acf7b6; }
+    @media (prefers-color-scheme: dark) {
+      .panel { fill: #0d1117; }
+      .muted { fill: #8b949e; }
+      .ink { fill: #e6edf3; }
+      .stroke { stroke: #30363d; }
+      .efi { fill: #0c2d6b; }
+      .msr { fill: #3b2500; }
+      .win { fill: #0c2d6b; }
+      .rec { fill: #5d0f12; }
+      .free { fill: #161b22; }
+      .win-after { fill: #0a3d1f; }
+    }
+  </style>
+  <rect class="panel" width="960" height="280" rx="12"/>
+
+  <text x="24" y="36" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700">Can't extend C:? Recovery is in the way.</text>
+  <text x="24" y="58" class="muted" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Windows 10/11 · GPT · WinRE recovery partition</text>
+
+  <text x="24" y="96" class="muted" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">BEFORE — Extend Volume greyed out</text>
+  <g transform="translate(24,108)">
+    <rect class="efi stroke" x="0" y="0" width="72" height="44" rx="6" stroke-width="1"/>
+    <text x="36" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">EFI</text>
+    <rect class="msr stroke" x="76" y="0" width="64" height="44" rx="6" stroke-width="1"/>
+    <text x="108" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">MSR</text>
+    <rect class="win stroke" x="144" y="0" width="320" height="44" rx="6" stroke-width="1"/>
+    <text x="304" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">C: Windows</text>
+    <rect class="rec stroke" x="468" y="0" width="150" height="44" rx="6" stroke-width="1"/>
+    <text x="543" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Recovery</text>
+    <rect class="free stroke" x="622" y="0" width="290" height="44" rx="6" stroke-width="1"/>
+    <text x="767" y="27" text-anchor="middle" class="muted" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Unallocated</text>
+  </g>
+  <text x="543" y="172" text-anchor="middle" class="muted" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11">blocks extend</text>
+  <path d="M543 168 L543 156" class="stroke" fill="none" stroke-width="1.5"/>
+
+  <text x="24" y="208" class="muted" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">AFTER — yolomover relocate + extend</text>
+  <g transform="translate(24,220)">
+    <rect class="efi stroke" x="0" y="0" width="72" height="44" rx="6" stroke-width="1"/>
+    <text x="36" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">EFI</text>
+    <rect class="msr stroke" x="76" y="0" width="64" height="44" rx="6" stroke-width="1"/>
+    <text x="108" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">MSR</text>
+    <rect class="win-after stroke" x="144" y="0" width="614" height="44" rx="6" stroke-width="1"/>
+    <text x="451" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">C: Windows (extended)</text>
+    <rect class="rec stroke" x="762" y="0" width="150" height="44" rx="6" stroke-width="1"/>
+    <text x="837" y="27" text-anchor="middle" class="ink" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Recovery</text>
+  </g>
+</svg>
