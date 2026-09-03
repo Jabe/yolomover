@@ -31,6 +31,9 @@ pub fn print_disk_layout(layout: &DiskLayout) {
     if layout.stale_primary_gpt {
         println!("  Note:        primary GPT header is stale; using device size for planning");
     }
+    if layout.used_backup_gpt {
+        println!("  Note:        primary GPT invalid; using backup copy");
+    }
     println!("  Partitions:");
     for p in &layout.partitions {
         if p.is_unused() {

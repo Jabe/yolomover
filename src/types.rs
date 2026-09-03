@@ -36,6 +36,8 @@ pub struct DiskLayout {
     pub header_last_usable: u64,
     /// Primary GPT header describes a smaller disk than the device.
     pub stale_primary_gpt: bool,
+    /// Partition list came from the backup GPT because the primary copy failed CRC.
+    pub used_backup_gpt: bool,
     pub partitions: Vec<GptPartitionEntry>,
     pub recovery: Option<GptPartitionEntry>,
     pub boot_partition: Option<GptPartitionEntry>,
@@ -128,6 +130,7 @@ mod tests {
             header_first_usable: 34,
             header_last_usable: 0,
             stale_primary_gpt: false,
+            used_backup_gpt: false,
             partitions: vec![
                 GptPartitionEntry {
                     index: 0,

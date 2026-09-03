@@ -4,9 +4,11 @@
 
 mod crc;
 mod range;
+mod table;
 
 pub use crc::{efi_crc32, gpt_header_crc_valid};
 pub use range::LbaRange;
+pub use table::{GptTable, SectorIo};
 
 use crate::error::{Result, YoloError};
 use std::fmt;

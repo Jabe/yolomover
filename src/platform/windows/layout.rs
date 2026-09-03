@@ -1,36 +1,25 @@
 use crate::error::{Result, YoloError};
-use crate::gpt::{
-    disk_sector_count, last_usable_lba_for_disk_sectors, GptHeader, GptPartitionEntry,
-    PARTITION_ARRAY_SECTORS, PARTITION_COUNT, PARTITION_ENTRY_SIZE, SECTOR_SIZE,
-};
+use crate::gpt::{disk_sector_count, last_usable_lba_for_disk_sectors, GptPartitionEntry};
 use crate::platform::windows::disk::PhysicalDisk;
+use crate::platform::windows::gpt_disk::GptOnDisk;
 use crate::types::DiskLayout;
 use tracing::debug;
 
-const PRIMARY_GPT_LBA: u64 = 1;
-
 pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
-    let sector = disk.read_one_sector(PRIMARY_GPT_LBA)?;
-    let header = GptHeader::parse(&sector)?;
-
-    if header.partition_entry_size as usize != PARTITION_ENTRY_SIZE {
-        return Err(YoloError::GptInvalid {
-            detail: format!("unexpected entry size {}", header.partition_entry_size),
+    let is_gpt = is_gpt_disk(disk)?;
+    if !is_gpt {
+        return Err(YoloError::MbrDisk {
+            disk_index: disk.index,
         });
     }
 
-    let entry_lba = header.partition_entry_lba;
-    let mut raw_entries = vec![0u8; (PARTITION_ARRAY_SECTORS * SECTOR_SIZE) as usize];
-    disk.read_sectors(entry_lba, PARTITION_ARRAY_SECTORS, &mut raw_entries)?;
+    let gpt = GptOnDisk::load(disk)?;
 
     let mut partitions = Vec::new();
     let mut recovery = Vec::new();
     let mut boot_candidates = Vec::new();
 
-    for i in 0..PARTITION_COUNT.min(header.partition_count as usize) {
-        let off = i * PARTITION_ENTRY_SIZE;
-        let entry =
-            GptPartitionEntry::parse(i as u32, &raw_entries[off..off + PARTITION_ENTRY_SIZE])?;
+    for entry in &gpt.entries {
         if entry.is_unused() {
             continue;
         }
@@ -40,37 +29,27 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
         if entry.type_guid.is_esp() {
             boot_candidates.push(entry.clone());
         }
-        partitions.push(entry);
+        partitions.push(entry.clone());
     }
 
     let recovery = pick_recovery(recovery, disk.index)?;
     let boot_partition = pick_boot_partition(&partitions, &boot_candidates);
 
-    let is_gpt = is_gpt_disk(disk)?;
-    if !is_gpt {
-        return Err(YoloError::MbrDisk {
-            disk_index: disk.index,
-        });
-    }
-
     debug!(
         disk = disk.index,
         parts = partitions.len(),
         recovery = recovery.as_ref().map(|p| p.index),
+        stale_primary_gpt = gpt.stale_primary_gpt,
+        used_backup_gpt = gpt.used_backup,
         "parsed layout"
     );
 
     let device_sectors = disk_sector_count(disk.size_bytes, disk.sector_size);
-    let gpt_sectors = header.backup_lba.saturating_add(1);
-    let stale_primary_gpt = device_sectors > gpt_sectors;
     let header_last_usable = last_usable_lba_for_disk_sectors(device_sectors);
 
-    if stale_primary_gpt {
+    if gpt.stale_primary_gpt {
         debug!(
             disk = disk.index,
-            gpt_sectors,
-            device_sectors,
-            primary_last_usable = header.last_usable_lba,
             effective_last_usable = header_last_usable,
             "primary GPT header smaller than device; using device size"
         );
@@ -82,9 +61,10 @@ pub fn read_disk_layout(disk: &mut PhysicalDisk) -> Result<DiskLayout> {
         is_gpt: true,
         disk_size_bytes: disk.size_bytes,
         sector_size: disk.sector_size,
-        header_first_usable: header.first_usable_lba,
+        header_first_usable: gpt.primary_header.first_usable_lba,
         header_last_usable,
-        stale_primary_gpt,
+        stale_primary_gpt: gpt.stale_primary_gpt,
+        used_backup_gpt: gpt.used_backup,
         partitions,
         recovery,
         boot_partition,
